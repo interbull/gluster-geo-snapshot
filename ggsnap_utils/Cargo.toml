@@ -1,0 +1,9 @@
+[package]
+name = "ggsnap_utils"
+version = "0.1.0"
+authors = ["marcus <marcus.pedersen@slu.se>"]
+
+[dependencies]
+toml = "0.4"
+serde_derive = "1.0"
+serde = "1.0"
