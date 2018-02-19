@@ -1,0 +1,10 @@
+*~
+*.retry
+*.pyc
+.project
+.pydevproject
+databases
+progress.log
+sessions
+routes.example.py
+errors
