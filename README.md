@@ -81,7 +81,7 @@ If config file is wrongly formated, you will get an error and snapshots will
 not be made until config file is corrected.  
 
 ## Setup
-ggsnap should me in main master node and ggsnap_slave in main slave node.  
+ggsnap should be in main master node and ggsnap_slave in main slave node.  
 Setup a cron job to run ggsnap on master.  
 Root crontab:  
 ```
