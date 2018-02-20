@@ -4,6 +4,20 @@ This is a software that creates and saves snapshots on a gluster geo-replicated 
 Snapshots are created and saved according to specified scheme in ggsnap.conf file.  
 Snapshots are created on both master and slave cluster.  
 
+## Usage
+There are two options to create snapshots:  
+ * Use valid options on command line starting ggsnap
+ ```
+ ggsnap --volume matser-volume --slave slave-volume --host slave-host-name --user slave-host-user
+ ```
+ If some option is left out value will be read from config file.
+ If value is missing in config file, you will get an error.
+ * Use information from config file and start ggsnap with:
+ ```
+ ggsnap --create-snapshots
+ ```
+ If all required information is not in config file, you will get an error.
+
 ## Compilation
 gluster-geo-snapshot is written in rust: <https://www.rust-lang.org>  
 To compile install both rust and cargo packages, on centos 7:  
@@ -40,6 +54,7 @@ If config file is not found, default settings will be used.
 Config file showing the default settings:  
 ```
 [general]
+# All values are required
 # Path to binary gluster change if installed somewere else
 gluster_bin = "/usr/sbin/gluster"
 
@@ -49,17 +64,31 @@ ggsnap_slave_bin = "/root/ggsnap_slave"
 
 # Settings for how snapshots should be saved
 [snapshot]
+# All values are required except the last one marked as optional
 # Number of days that snapshot should be saved every day from today
 number_days_every_day = 10
+
 # Number of months that two snapshot per month should be saved after days.
 number_months_with_two = 3
+
 # Number of months in total; the rest of the months one snapshot is saved
 number_months_total = 12
+
+# All the following values are optional,
+# one or more values can be specified
+# If options for these values are not specified on command line
+# the values will be used from this file
+master_volume = ""
+slave_volume = ""
+slave_hostname = ""
+slave_user = ""
 
 
 # Mail settings for sending status mails every time a snapshot is done.
 # Master node is sending mail, slave node do not use this setting
 # Mail is disabled by default
+# All values are optional but if specified all values
+# must be specified
 [mail_from_master]
 # Smtp server to use when sending mails
 smtp_server = ""

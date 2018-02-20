@@ -33,39 +33,75 @@ static CONF_ETC_SUB_DIR: &'static str = "/etc/ggsnap/ggsnap.conf";
 /// Config file ggsnap.conf is interpretated with toml format  
 #[derive(Deserialize)]
 pub struct Config {
-    general: General,
-    snapshot: Snapshot,
-    mail_from_master: Option<MailFromMaster>,
+    pub general: General,
+    pub snapshot: Snapshot,
+    pub mail_from_master: Option<MailFromMaster>,
+}
+
+impl Config {
+    /// If config file is missing a default
+    /// Config struct is returned
+    pub fn default_config() -> Config {
+        Config {
+            general: General {
+                gluster_bin: String::from("/usr/sbin/gluster"),
+                ggsnap_slave_bin: String::from("/root/ggsnap_slave")
+            },
+            snapshot: Snapshot {
+                number_days_every_day: 10,
+                number_months_with_two: 3,
+                number_months_total: 12,
+                master_volume: None,
+                slave_volume: None,
+                slave_hostname: None,
+                slave_user: None
+            },
+            mail_from_master: None
+        }
+    }
 }
 
 /// Struct that holds information about sub section [general]  
 /// in config file
 #[derive(Deserialize)]
-struct General {
-    gluster_bin: String,
-    ggsnap_slave_bin: String,
+pub struct General {
+    pub gluster_bin: String,
+    pub ggsnap_slave_bin: String,
 }
 
 /// Struct that holds information about sub section [snapshot]  
 /// in config file
 #[derive(Deserialize)]
-struct Snapshot {
-    number_days_every_day: u32,
-    number_months_with_two: u32,
-    number_months_total: u32,
+pub struct Snapshot {
+    pub number_days_every_day: u32,
+    pub number_months_with_two: u32,
+    pub number_months_total: u32,
+    pub master_volume: Option<String>,
+    pub slave_volume: Option<String>,
+    pub slave_hostname: Option<String>,
+    pub slave_user: Option<String>,
 }
 
 /// Struct that holds information about sub section [mail_from_master]  
 /// in config file
 #[derive(Deserialize)]
-struct MailFromMaster {
-    smtp_server: String,
-    authentification_mechanism: String,
-    username: String,
-    password: String,
-    from_sender_address: String,
-    to_addresses: Vec<String>,
-    enable: bool,
+pub struct MailFromMaster {
+    pub smtp_server: String,
+    pub authentification_mechanism: String,
+    pub username: String,
+    pub password: String,
+    pub from_sender_address: String,
+    pub to_addresses: Vec<String>,
+    pub enable: bool,
+}
+
+
+/// Type to describe type of read error
+#[derive(PartialEq, Debug)]
+pub enum ConfigReadErr {
+    ConfigNotFound,
+    ReadFileErr,
+    ConfigParseErr,
 }
 
 /// Function checks for config file in three locations:  
@@ -87,32 +123,35 @@ struct MailFromMaster {
 /// If file is not found or an error occur while
 /// trying to read config file, an error is returned
 /// containing description of error.  
-pub fn get_config() -> Result<Config, String> {
+pub fn get_config() -> Result<Config, (ConfigReadErr, String)> {
     let mut conf_content = String::new();
 
     if let Ok(mut f) = File::open(CONF_FILE) {
         match f.read_to_string(&mut conf_content) {
             Ok(_) => (),
-            Err(e) => return Err(format!("Error: Can not read {} in current directory\n{}",
-                                         CONF_FILE, e.to_string()))
+            Err(e) => return Err((ConfigReadErr::ReadFileErr,
+                                  format!("Error: Can not read {} in current directory\n{}",
+                                          CONF_FILE, e.to_string()))),
         }
     }
     else if let Ok(mut f) = File::open(CONF_ETC_DIR) {
         match f.read_to_string(&mut conf_content) {
             Ok(_) => (),
-            Err(e) => return Err(format!("Error: Can not read config file: {}\n{}",
-                                         CONF_ETC_DIR, e.to_string()))
+            Err(e) => return Err((ConfigReadErr::ReadFileErr,
+                                  format!("Error: Can not read config file: {}\n{}",
+                                          CONF_ETC_DIR, e.to_string()))),
         }
     }
     else if let Ok(mut f) = File::open(CONF_ETC_SUB_DIR) {
         match f.read_to_string(&mut conf_content) {
             Ok(_) => (),
-            Err(e) => return Err(format!("Error: Can not read config file: {}\n{}",
-                                         CONF_ETC_SUB_DIR, e.to_string())),
+            Err(e) => return Err((ConfigReadErr::ReadFileErr,
+                                  format!("Error: Can not read config file: {}\n{}",
+                                          CONF_ETC_SUB_DIR, e.to_string()))),
         }
     }
     else {
-        return Err(format!("Config file: {} is not found in current dir, /etc/ or /etc/ggsnap/", CONF_FILE))
+        return Err((ConfigReadErr::ConfigNotFound, format!("Config file: {} is not found in current dir, /etc/ or /etc/ggsnap/", CONF_FILE)))
     }
 
     parse_config(&conf_content)
@@ -120,10 +159,10 @@ pub fn get_config() -> Result<Config, String> {
 
 /// Parses config string and returns a Config populated with
 /// the content from string
-fn parse_config(config_content: &String) -> Result<Config, String> {
+fn parse_config(config_content: &String) -> Result<Config, (ConfigReadErr, String)> {
     match toml::from_str(config_content.as_str()) {
         Ok(c) => Ok(c),
-        Err(e) => Err(format!("Error parse config file: {}", e))
+        Err(e) => Err((ConfigReadErr::ConfigParseErr, format!("Error parse config file: {}", e)))
     }
 }
 
