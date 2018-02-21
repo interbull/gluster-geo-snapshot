@@ -33,12 +33,12 @@ use ggsnap_utils::{get_config, Config, ConfigReadErr };
 /// checks that configuration is correct
 fn main() {
     let matches = arg_matches();
-    let mut config: Config = Config::default_config();
     
     if matches.is_present("VOLUME")   || matches.is_present("SLAVE") ||
        matches.is_present("USER")     || matches.is_present("SLAVE_HOST") ||
        matches.is_present("SNAPSHOT") || matches.is_present("INFO") {
 
+        let mut config: Config = Config::default_config();
         let mut config_file_exist = true;
         let mut config_err = false;
         config = match get_config() {
@@ -112,22 +112,22 @@ fn main() {
             println!("Use -h or --help for help");
             std::process::exit(1);
         }
-    }
 
-    let config = config;
+        let config = config;
 
-    if matches.is_present("INFO") {
-        let success = print_statistics(&config);
+        if matches.is_present("INFO") {
+            let success = print_statistics(&config);
 
-        if success.is_err() {
-            std::process::exit(1);
+            if success.is_err() {
+                std::process::exit(1);
+            }
         }
-    }
-    else {
-        let res = create_snapshot(&config);
+        else {
+            let res = create_snapshot(&config);
 
-        if res.is_err() {
-            std::process::exit(1);
+            if res.is_err() {
+                std::process::exit(1);
+            }
         }
     }
 }
@@ -187,7 +187,8 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
     }
 
     let snap_name = format!("snap_{}_{}", config.snapshot.master_volume.clone().unwrap(), date.format("%Y%m%d_%H%M%S"));
-    log = format!("{}\nMaster: Creating snapshot: {}", log, snap_name);
+    log = format!("{}\nMaster: Creating snapshot: {} on volume: {}", 
+                  log, snap_name, config.snapshot.master_volume.clone().unwrap());
 
     let cmd_out = Command::new(&config.general.gluster_bin)
                           .arg("snapshot")
@@ -201,12 +202,20 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
         Ok(o) => {
             log = format!("{}\nMaster: {}{}", log, String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
             if !o.status.success() {
-                print_log(&log, false);
+                match resume_geo_replication(&config, &log) {
+                    Ok(l) => {
+                        print_log(&l, false);
+                    }
+                    Err(l) => {
+                        print_log(&l, false);
+                    }
+                }
+
                 return Err(String::from("Error"))
             }
         }
         Err(e) => {
-            log = format!("{}\nMaster: Error running command: gluster create snapshot {} {} no-timestamp",
+            log = format!("{}\nMaster: Error running command: gluster snapshot create {} {} no-timestamp",
                           log, snap_name, config.snapshot.master_volume.clone().unwrap());
             log = format!("{}\nMaster: Error: {}", log, e.to_string());
             print_log(&log, false);

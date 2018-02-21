@@ -5,3 +5,4 @@ authors = ["Marcus Pedersén <marcus.pedersen@slu.se>"]
 
 [dependencies]
 clap = "2.29.4"
+ggsnap_utils = { path = "../ggsnap_utils" }

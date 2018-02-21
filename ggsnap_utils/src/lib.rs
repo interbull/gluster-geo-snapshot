@@ -126,32 +126,57 @@ pub enum ConfigReadErr {
 pub fn get_config() -> Result<Config, (ConfigReadErr, String)> {
     let mut conf_content = String::new();
 
-    if let Ok(mut f) = File::open(CONF_FILE) {
-        match f.read_to_string(&mut conf_content) {
-            Ok(_) => (),
-            Err(e) => return Err((ConfigReadErr::ReadFileErr,
-                                  format!("Error: Can not read {} in current directory\n{}",
-                                          CONF_FILE, e.to_string()))),
+    if let Ok(mut current_exe) = std::env::current_exe() {
+        current_exe.pop();
+        current_exe.push(CONF_FILE);
+        if let Ok(mut f) = File::open(current_exe) {
+            match f.read_to_string(&mut conf_content) {
+                Ok(_) => (),
+                Err(e) => return Err((ConfigReadErr::ReadFileErr,
+                                      format!("Error: Can not read {} in current directory\n{}",
+                                              CONF_FILE, e.to_string()))),
+            }
         }
-    }
-    else if let Ok(mut f) = File::open(CONF_ETC_DIR) {
-        match f.read_to_string(&mut conf_content) {
-            Ok(_) => (),
-            Err(e) => return Err((ConfigReadErr::ReadFileErr,
-                                  format!("Error: Can not read config file: {}\n{}",
-                                          CONF_ETC_DIR, e.to_string()))),
+        else if let Ok(mut f) = File::open(CONF_ETC_DIR) {
+            match f.read_to_string(&mut conf_content) {
+                Ok(_) => (),
+                Err(e) => return Err((ConfigReadErr::ReadFileErr,
+                                      format!("Error: Can not read config file: {}\n{}",
+                                              CONF_ETC_DIR, e.to_string()))),
+            }
         }
-    }
-    else if let Ok(mut f) = File::open(CONF_ETC_SUB_DIR) {
-        match f.read_to_string(&mut conf_content) {
-            Ok(_) => (),
-            Err(e) => return Err((ConfigReadErr::ReadFileErr,
-                                  format!("Error: Can not read config file: {}\n{}",
-                                          CONF_ETC_SUB_DIR, e.to_string()))),
+        else if let Ok(mut f) = File::open(CONF_ETC_SUB_DIR) {
+            match f.read_to_string(&mut conf_content) {
+                Ok(_) => (),
+                Err(e) => return Err((ConfigReadErr::ReadFileErr,
+                                      format!("Error: Can not read config file: {}\n{}",
+                                              CONF_ETC_SUB_DIR, e.to_string()))),
+            }
+        }
+        else {
+            return Err((ConfigReadErr::ConfigNotFound, format!("Config file: {} is not found in current dir, /etc/ or /etc/ggsnap/", CONF_FILE)))
         }
     }
     else {
-        return Err((ConfigReadErr::ConfigNotFound, format!("Config file: {} is not found in current dir, /etc/ or /etc/ggsnap/", CONF_FILE)))
+        if let Ok(mut f) = File::open(CONF_ETC_DIR) {
+            match f.read_to_string(&mut conf_content) {
+                Ok(_) => (),
+                Err(e) => return Err((ConfigReadErr::ReadFileErr,
+                                      format!("Error: Can not read config file: {}\n{}",
+                                              CONF_ETC_DIR, e.to_string()))),
+            }
+        }
+        else if let Ok(mut f) = File::open(CONF_ETC_SUB_DIR) {
+            match f.read_to_string(&mut conf_content) {
+                Ok(_) => (),
+                Err(e) => return Err((ConfigReadErr::ReadFileErr,
+                                      format!("Error: Can not read config file: {}\n{}",
+                                              CONF_ETC_SUB_DIR, e.to_string()))),
+            }
+        }
+        else {
+            return Err((ConfigReadErr::ConfigNotFound, format!("Config file: {} is not found in current dir, /etc/ or /etc/ggsnap/", CONF_FILE)))
+        }
     }
 
     parse_config(&conf_content)
