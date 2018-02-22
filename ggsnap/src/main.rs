@@ -41,6 +41,7 @@ fn main() {
         let mut config: Config = Config::default_config();
         let mut config_file_exist = true;
         let mut config_err = false;
+        let mut config_err_text: String = String::new();
         config = match get_config() {
             Ok(c) => c,
             Err((e, e_str)) => {
@@ -81,26 +82,52 @@ fn main() {
         }
 
         if config.snapshot.master_volume.is_none() {
-            println!("Error: Missing config value master volume name: master_volume");
+            config_err_text = String::from("Error: Missing config value master volume name: master_volume");
             config_err = true;
         }
 
         if config.snapshot.slave_volume.is_none() {
-            println!("Error: Missing config value slave volume name: slave_volume");
+            if config_err_text.len() == 0 {
+                config_err_text = String::from("Error: Missing config value slave volume name: slave_volume");
+            }
+            else {
+                config_err_text = format!("{}\nError: Missing config value slave volume name: slave_volume", config_err_text);
+            }
             config_err = true;
         }
 
         if config.snapshot.slave_user.is_none() {
-            println!("Error: Missing config value slave user name: slave_user");
+            if config_err_text.len() == 0 {
+                config_err_text = String::from("Error: Missing config value slave user name: slave_user");
+            }
+            else {
+                config_err_text = format!("{}\nError: Missing config value slave user name: slave_user", config_err_text);
+            }
             config_err = true;
         }
 
         if config.snapshot.slave_hostname.is_none() {
-            println!("Error: Missing config value slave hostname name: slave_hostname");
+            if config_err_text.len() == 0 {
+                config_err_text = String::from("Error: Missing config value slave hostname name: slave_hostname");
+            }
+            else {
+                config_err_text = format!("{}\nError: Missing config value slave hostname name: slave_hostname", config_err_text);
+            }
             config_err = true;
         }
 
-        if config_err {
+        let config = config;
+
+        if matches.is_present("INFO") && 
+           config.snapshot.slave_hostname.is_some() {
+            let success = print_statistics(&config);
+
+            if success.is_err() {
+                std::process::exit(1);
+            }
+        }
+        else if config_err {
+            println!("{}", config_err_text);
             if config_file_exist {
                 println!("Add missing arguments or update config file and try again");
             }
@@ -113,16 +140,9 @@ fn main() {
             std::process::exit(1);
         }
 
-        let config = config;
 
-        if matches.is_present("INFO") {
-            let success = print_statistics(&config);
 
-            if success.is_err() {
-                std::process::exit(1);
-            }
-        }
-        else {
+        if !matches.is_present("INFO") {
             let res = create_snapshot(&config);
 
             if res.is_err() {
@@ -186,7 +206,19 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
         }
     }
 
-    let snap_name = format!("snap_{}_{}", config.snapshot.master_volume.clone().unwrap(), date.format("%Y%m%d_%H%M%S"));
+    let snap_name = format!("ggsnap_{}_{}", config.snapshot.master_volume.clone().unwrap(), date.format("%Y%m%d_%H%M%S"));
+
+    let mut slave_snap_success = true;
+    match create_slave_snapshot(&config, &snap_name) {
+        Ok(m) => log = format!("{}\n{}", log, m),
+        Err(e) => {
+            log = format!("{}\n{}", log, e);
+            slave_snap_success = false;
+        }
+    }
+
+    let slave_snap_success = slave_snap_success;
+
     log = format!("{}\nMaster: Creating snapshot: {} on volume: {}", 
                   log, snap_name, config.snapshot.master_volume.clone().unwrap());
 
@@ -223,9 +255,18 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
         }
     }
 
+    let mut old_snap_success = true;
+    match remove_old_snapshots(&config) {
+        Ok(s) => log = format!("{}\n{}", log, s),
+        Err(e) => {
+            log = format!("{}\n{}", log, e);
+            old_snap_success = false;
+        }
+    }
+
     match resume_geo_replication(&config, &log) {
         Ok(l) => {
-            print_log(&l, true);
+            print_log(&l, slave_snap_success && old_snap_success);
         }
         Err(l) => {
             print_log(&l, false);
@@ -233,7 +274,7 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
         }
     }
 
-    remove_old_snapshots();
+
 
     Ok(())
 }
@@ -273,13 +314,55 @@ fn resume_geo_replication(config: &Config, log: &String) -> Result<String, Strin
     Ok(l)
 }
 
-fn create_slave_snapshot() {
-    //TODO
+/// Connects to main slave node over ssh
+/// and runs ggsnap_slave to create a
+/// snapshot
+fn create_slave_snapshot(config: &Config, snap_name: &String) -> Result<String, String>{
+    let cmd_out = Command::new("ssh")
+                          .arg(&config.snapshot.slave_hostname.clone().unwrap())
+                          .arg(&config.general.ggsnap_slave_bin)
+                          .arg("--volume")
+                          .arg(&config.snapshot.slave_volume.clone().unwrap())
+                          .arg("--snapshot-name")
+                          .arg(snap_name)
+                          .output();
+
+    match cmd_out {
+        Ok(o) => {
+            let l = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+            if o.status.success() {
+                Ok(l)
+            }
+            else {
+                Err(format!("Slave error creating snapshot:\n{}", l))
+            }
+        },
+        Err(e) => {
+            let mut l: String = format!("Master: Error running command: ssh {} {} --volume {} --snapshot-name {}",
+                                         config.snapshot.slave_hostname.clone().unwrap(),
+                                         config.general.ggsnap_slave_bin,
+                                         config.snapshot.slave_volume.clone().unwrap(),
+                                         snap_name);
+            l = format!("{}\nMaster: Error: {}", l, e.to_string());
+            Err(l)
+        }           
+    }
+                          
 }
 
-fn remove_old_snapshots() {
+/// Removes old snapshot from master node according 
+/// to settings in config file.
+fn remove_old_snapshots(config: &Config) -> Result<String, String>{
     //TODO
-    println!("Removing old snapshots");
+    let mut log = String::from("Master: Removing old snapshots");
+
+    match ggsnap_utils::remove_old_snapshots(config) {
+        Ok(s) => {
+            log = format!("{}\nMaster: The following snapshots has been removed:\n{}", log, s);
+            Ok(format!("{}\nMaster: End of removing snapshots", log))
+        },
+        Err(e) => Err(format!("{}\nMaster: Error removing old snapshots:\n{}", log, e)),
+    }
 }
 
 fn remove_old_slave_snapshots() {
@@ -320,11 +403,11 @@ fn print_statistics(config: &Config) -> Result<(),()>{
     }
 
     
-    let slave_stats = stats::SnapStat::new(slave_gluster_out);
-    let stats = stats::get_statistics();
+    let slave_stats = stats::SnapStat::new(slave_gluster_out, &config.snapshot.slave_volume.clone().unwrap());
+    let stats = stats::get_statistics(&config);
 
     println!("==================================================================================");
-    println!("=               Snapshot statistics (Snapshots created by snapurd)               =");
+    println!("=               Snapshot statistics (Snapshots created by ggsnap)                =");
     println!("==================================================================================");
     println!("Total number of snapshots on master cluster: {}", stats.len());
     println!("Newest snapshot on master cluster: {}", stats.newest_snap());
@@ -341,8 +424,13 @@ fn print_statistics(config: &Config) -> Result<(),()>{
     Ok(())
 }
 
+/// Prints result to log file in same 
+/// directory as binary
+/// If mail is active, mail will be sent
+/// with result.
 fn print_log(log: &String, success: bool) {
     //TODO
+    // Send mail and and append to log in same dir as ggsnap
     println!("{}\nSuccess: {}", log, success);
 }
 
@@ -386,7 +474,7 @@ if not specified in config file."))
        .arg(Arg::with_name("SLAVE_HOST")
             .short("H")
             .long("host")
-            .conflicts_with_all(&["SNAPSHOT", "INFO"])
+            .conflicts_with_all(&["SNAPSHOT"])
             .takes_value(true)
             .help("Hostname for primary slave node.
 Options VOULME and USER is reqiured
@@ -394,7 +482,7 @@ if not specified in config file."))
        .arg(Arg::with_name("INFO")
             .short("i")
             .long("info")
-            .conflicts_with_all(&["VOLUME", "USER", "SLAVE_HOST", "SLAVE", "SNAPSHOT"])
+            .conflicts_with_all(&["VOLUME", "USER", "SLAVE", "SNAPSHOT"])
             .help("Shows statistics on snapshots
 for both master and slave cluster.
 Option SLAVE_HOST is required

@@ -24,6 +24,7 @@ extern crate toml;
 
 use std::fs::File;
 use std::io::prelude::*;
+use std::process::Command;
 
 static CONF_FILE: &'static str = "ggsnap.conf";
 static CONF_ETC_DIR: &'static str = "/etc/ggsnap.conf";
@@ -191,6 +192,32 @@ fn parse_config(config_content: &String) -> Result<Config, (ConfigReadErr, Strin
     }
 }
 
+
+/// Uses config file parameters in [snapshot]
+/// to deside what to save and what to delete
+/// On success a tring containing removed snapshots
+/// will be returned. On error, error message will be returned
+pub fn remove_old_snapshots(config: &Config) -> Result<String, String> {
+    let mut snap_output: String = String::new();
+    let cmd_out = Command::new(&config.general.gluster_bin)
+                          .arg("snapshot")
+                          .arg("list")
+                          .output();
+
+    match cmd_out {
+        Ok(o) => {
+            if o.status.success() {
+                snap_output = format!("{}", String::from_utf8_lossy(&o.stdout));
+            }
+            else {
+                return Err(format!("Error getting snapshots: {}{}", String::from_utf8_lossy(&o.stdout),
+                            String::from_utf8_lossy(&o.stderr)))
+            }
+        },
+        Err(e) => return Err(format!("Error executing command: gluster snapshot list\n{}", e.to_string())),
+    }
+    Ok(snap_output)
+}
 
 #[cfg(test)]
 mod tests {

@@ -23,15 +23,18 @@ extern crate regex;
 
 use std::process::Command;
 use self::regex::Regex;
+use ggsnap_utils::Config;
 
 pub struct SnapStat {
     snapnames: Vec<String>,
 }
 
 impl SnapStat {
-    pub fn new(gluster_snap_list: String) -> SnapStat {
+    /// Creates a new SnapStat containing valid snapshots
+    pub fn new(gluster_snap_list: String, volume: &String) -> SnapStat {
         let mut snap_list: Vec<String> = Vec::new();
-        let re_snap = Regex::new(r"^snap_.*_\d{8}_\d{6}$").unwrap();
+        let r_str = format!("^ggsnap_{}_\\d{{8}}_\\d{{6}}$", volume);
+        let re_snap = Regex::new(r_str.as_str()).unwrap();
 
         for line in gluster_snap_list.split("\n") {
             if re_snap.is_match(line) {
@@ -41,11 +44,13 @@ impl SnapStat {
 
         SnapStat { snapnames: snap_list }
     }
-
+    
+    /// Total number of valid snapshots
     pub fn len(&self) -> usize {
         self.snapnames.len()
     }
 
+    /// Returns the latest created snapshot
     pub fn newest_snap(&self) -> String {
         let mut newest_snap_date = 0;
         let mut newest_snap_time = 0;
@@ -70,6 +75,7 @@ impl SnapStat {
         newest_snap
     }
 
+    /// Returns the oldest created snapshot
     pub fn oldest_snap(&self) -> String {
         let mut oldest_snap_date = 99999999;
         let mut oldest_snap_time = 999999;
@@ -94,6 +100,8 @@ impl SnapStat {
         oldest_snap
     }
 
+    /// Returns the number of different snapshots
+    /// comparing two SnapStat struct.
     pub fn number_diff(&self, other: &SnapStat) -> u32 {
         let mut no_diff: u32 = 0;
 
@@ -114,15 +122,16 @@ impl SnapStat {
 
 }
 
-pub fn get_statistics() -> SnapStat {
-    let output = Command::new("/usr/sbin/gluster")
+/// Runs gluster command to get all snapshots
+pub fn get_statistics(config: &Config) -> SnapStat {
+    let output = Command::new(&config.general.gluster_bin)
                          .arg("snapshot")
                          .arg("list")
                          .output()
                          .expect("Error executing command: gluster snapshot list");
 
     let stdout: String = String::from_utf8_lossy(&output.stdout).to_string();
-    SnapStat::new(stdout)
+    SnapStat::new(stdout, &config.snapshot.master_volume.clone().unwrap())
 }
 
 
@@ -170,10 +179,10 @@ snap_vol_20180216_115924
 snap_vol_20180216_120438");
 
 
-        let stat = SnapStat::new(gluster_snap);
-        let stat2 = SnapStat::new(gluster_snap2);
-        let stat3 = SnapStat::new(gluster_snap3);
-        let stat4 = SnapStat::new(gluster_snap4);
+        let stat = SnapStat::new(gluster_snap, &String::from("vol"));
+        let stat2 = SnapStat::new(gluster_snap2, &String::from("vol"));
+        let stat3 = SnapStat::new(gluster_snap3, &String::from("vol"));
+        let stat4 = SnapStat::new(gluster_snap4, &String::from("vol"));
 
         assert_eq!(stat.len(), 7);
         assert_eq!(stat.newest_snap(), "snap_vol_20180216_120438");
