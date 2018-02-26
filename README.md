@@ -7,9 +7,8 @@ Snapshots are created on both master and slave cluster.
 Content:  
 
 * [Usage](#usage)
-* [Comilation](#compilation)
-* [ggsnap.conf file](#ggsnap.conf-file)
-* [ggsnap.conf file](#ggsnap.conf-file)
+* [Compilation](#compilation)
+* [ggsnap.conf file](#ggsnapconf-file)
 * [Setup](#setup)
 
 
