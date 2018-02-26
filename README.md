@@ -5,7 +5,6 @@ Snapshots are created and saved according to specified scheme in ggsnap.conf fil
 Snapshots are created on both master and slave cluster.
 
 Content:  
-
 * [Usage](#usage)
 * [Compilation](#compilation)
 * [ggsnap.conf file](#ggsnapconf-file)
