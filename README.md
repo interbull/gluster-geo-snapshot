@@ -8,7 +8,7 @@ Snapshots are created on both master and slave cluster.
 There are two options to create snapshots:  
  * Use valid options on command line starting ggsnap
  ```
- ggsnap --volume matser-volume --slave slave-volume --host slave-host-name --user slave-host-user
+ ggsnap --volume master-volume --slave slave-volume --host slave-host-name --user slave-host-user
  ```
  If some option is left out value will be read from config file.
  If value is missing in config file, you will get an error.
