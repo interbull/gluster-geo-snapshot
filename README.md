@@ -2,7 +2,16 @@
 
 This is a software that creates and saves snapshots on a gluster geo-replicated cluster.  
 Snapshots are created and saved according to specified scheme in ggsnap.conf file.  
-Snapshots are created on both master and slave cluster.  
+Snapshots are created on both master and slave cluster.
+
+Content:  
+
+* [Usage](#usage)
+* [Comilation](#compilation)
+* [ggsnap.conf file](#ggsnap.conf-file)
+* [ggsnap.conf file](#ggsnap.conf-file)
+* [Setup](#setup)
+
 
 ## Usage
 There are two options to create snapshots:  
