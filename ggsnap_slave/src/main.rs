@@ -31,7 +31,7 @@ fn main() {
     let matches = arg_matches();
 
     if matches.is_present("LIST") || matches.is_present("VOLUME") ||
-       matches.is_present("SNAPSHOT_NAME") {
+       matches.is_present("SNAPSHOT_NAME") || matches.is_present("REMOVE_SNAPSHOTS") {
         let mut snapshot_name: String = String::new();
         let mut config_file_exist = true;
         let mut config = Config::default_config();
@@ -52,6 +52,11 @@ fn main() {
 
         if config.snapshot.slave_volume.is_none() {
             config.snapshot.slave_volume = config.snapshot.master_volume.clone();
+        }
+
+        if config.snapshot.snapshot_name_prefix.is_none() {
+            let c = Config::default_config();
+            config.snapshot.snapshot_name_prefix = c.snapshot.snapshot_name_prefix.clone();
         }
 
         match matches.value_of("VOLUME") {
@@ -77,7 +82,8 @@ fn main() {
                 }
             }
         }
-        else if matches.is_present("VOLUME") || matches.is_present("SNAPSHOT_NAME") {
+        else if matches.is_present("VOLUME") || matches.is_present("SNAPSHOT_NAME") ||
+               matches.is_present("REMOVE_SNAPSHOTS") {
             if config.snapshot.slave_volume == None {
                 println!("Slave: Error: Missing config value slave volume name: slave_volume");
                 if config_file_exist {
@@ -91,13 +97,24 @@ fn main() {
                 println!("Use -h or --help for help");
                 std::process::exit(1);
             }
-            
-            match create_snapshot(&config, &snapshot_name) {
-                Ok(l) => println!("{}", l),
-                Err(l) => {
-                    println!("{}", l);
-                    std::process::exit(1);
-                },
+
+            if matches.is_present("REMOVE_SNAPSHOTS") {
+                match remove_old_snapshots(&config) {
+                    Ok(l) => println!("{}", l),
+                    Err(e) => {
+                        println!("{}", e);
+                        std::process::exit(1);
+                    },
+                }
+            }
+            else {
+                match create_snapshot(&config, &snapshot_name) {
+                    Ok(l) => println!("{}", l),
+                    Err(l) => {
+                        println!("{}", l);
+                        std::process::exit(1);
+                    },
+                }
             }
         }
     }
@@ -157,6 +174,21 @@ fn create_snapshot(config: &Config, snap_name: &String) -> Result<String, String
     }
 }
 
+
+/// Delete snapshots according to settings
+/// in config file.
+fn remove_old_snapshots(config: &Config) -> Result<String, String> {
+    let mut log = String::from("Slave: Removing old snapshots");
+
+    match ggsnap_utils::remove_old_snapshots(config, ggsnap_utils::HostType::Slave) {
+        Ok(s) => {
+            log = format!("{}\nSlave: The following snapshots has been removed:\n{}", log, s);
+            Ok(format!("{}\nSlave: End of removing snapshots", log))
+        },
+        Err(e) => Err(format!("{}\nSlave: Error removing snapshots:\n{}", log, e)),
+    }
+}
+
 /// Build argument parsing and help text
 fn arg_matches() -> ArgMatches<'static> {
     App::new("ggsnap_slave")
@@ -167,31 +199,37 @@ fn arg_matches() -> ArgMatches<'static> {
         .arg(Arg::with_name("LIST")
              .short("l")
              .long("list")
-             .conflicts_with_all(&["VOLUME", "SNAPSHOT_NAME"])
+             .conflicts_with_all(&["VOLUME", "SNAPSHOT_NAME", "REMOVE_SNAPSHOTS"])
              .help("Returns names of all snapshots available"))
         .arg(Arg::with_name("VOLUME")
              .short("v")
              .long("volume")
              .takes_value(true)
-             .requires("SNAPSHOT_NAME")
              .conflicts_with("LIST")
              .help("Creates gluster snapshot on volume VOLUME
 on the slave (geo) cluster
 Saves snapshots according to settings
 in config file.
-Deletes snapshots according to settings in config file.
+If run with --remove-snapshots, snapshots will be deleted.
 Requires SNAPSHOT_NAME."))
         .arg(Arg::with_name("SNAPSHOT_NAME")
              .short("n")
              .long("snapshot-name")
              .takes_value(true)
+             .required_unless("REMOVE_SNAPSHOTS")
              .conflicts_with("LIST")
              .help("Creates gluster snapshot on slave cluster.
 SNAPSHOT_NAME will be the name of the snapshot.
 Takes information about VOLUME from config file.
 Saves snapshots according to settings
 in config file.
-Deletes snapshots according to settings in config file."))
+If run with --remove-snapshots, snapshots will be deleted."))
+        .arg(Arg::with_name("REMOVE_SNAPSHOTS")
+             .short("r")
+             .long("remove-snapshots")
+             .conflicts_with_all(&["LIST", "SNAPSHOT_NAME"])
+             .help("Removes old snapshots according to settings
+in config file."))
         .after_help("Important! This program must run on slave (geo) node
 
 ggsnap_slave is executed from ggsnap that is on main mater node")

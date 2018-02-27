@@ -81,6 +81,11 @@ fn main() {
             config.snapshot.slave_volume = config.snapshot.master_volume.clone();
         }
 
+        if config.snapshot.snapshot_name_prefix.is_none() {
+            let c = Config::default_config();
+            config.snapshot.snapshot_name_prefix = c.snapshot.snapshot_name_prefix.clone();
+        }
+
         if config.snapshot.master_volume.is_none() {
             config_err_text = String::from("Error: Missing config value master volume name: master_volume");
             config_err = true;
@@ -206,7 +211,8 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
         }
     }
 
-    let snap_name = format!("ggsnap_{}_{}", config.snapshot.master_volume.clone().unwrap(), date.format("%Y%m%d_%H%M%S"));
+    let snap_name = format!("{}_{}_{}", config.snapshot.snapshot_name_prefix.clone().unwrap(),
+                            config.snapshot.master_volume.clone().unwrap(), date.format("%Y%m%d_%H%M%S"));
 
     let mut slave_snap_success = true;
     match create_slave_snapshot(&config, &snap_name) {

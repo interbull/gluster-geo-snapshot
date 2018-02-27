@@ -21,10 +21,13 @@
 #[macro_use]
 extern crate serde_derive;
 extern crate toml;
+extern crate chrono;
 
 use std::fs::File;
 use std::io::prelude::*;
 use std::process::Command;
+use std::collections::HashSet;
+use chrono::prelude::*;
 
 static CONF_FILE: &'static str = "ggsnap.conf";
 static CONF_ETC_DIR: &'static str = "/etc/ggsnap.conf";
@@ -52,6 +55,7 @@ impl Config {
                 number_days_every_day: 10,
                 number_months_with_two: 3,
                 number_months_total: 12,
+                snapshot_name_prefix: Some(String::from("ggsnap")),
                 master_volume: None,
                 slave_volume: None,
                 slave_hostname: None,
@@ -77,6 +81,7 @@ pub struct Snapshot {
     pub number_days_every_day: u32,
     pub number_months_with_two: u32,
     pub number_months_total: u32,
+    pub snapshot_name_prefix: Option<String>,
     pub master_volume: Option<String>,
     pub slave_volume: Option<String>,
     pub slave_hostname: Option<String>,
@@ -103,6 +108,12 @@ pub enum ConfigReadErr {
     ConfigNotFound,
     ReadFileErr,
     ConfigParseErr,
+}
+
+#[derive(PartialEq, Debug)]
+pub enum HostType {
+    Master,
+    Slave,
 }
 
 /// Function checks for config file in three locations:  
@@ -197,8 +208,11 @@ fn parse_config(config_content: &String) -> Result<Config, (ConfigReadErr, Strin
 /// to deside what to save and what to delete
 /// On success a tring containing removed snapshots
 /// will be returned. On error, error message will be returned
-pub fn remove_old_snapshots(config: &Config) -> Result<String, String> {
+pub fn remove_old_snapshots(config: &Config, host_type: HostType) -> Result<String, String> {
     let mut snap_output: String = String::new();
+    let mut gluster_snaps: Vec<String> = Vec::new();
+    let mut rm_every_day: HashSet<String> = HashSet::new();
+    let mut rm_months_two: HashSet<String> = HashSet::new();
     let cmd_out = Command::new(&config.general.gluster_bin)
                           .arg("snapshot")
                           .arg("list")
@@ -208,6 +222,9 @@ pub fn remove_old_snapshots(config: &Config) -> Result<String, String> {
         Ok(o) => {
             if o.status.success() {
                 snap_output = format!("{}", String::from_utf8_lossy(&o.stdout));
+                gluster_snaps = filter_gluster_snapshots(&snap_output, &config, &host_type);
+                rm_every_day = get_remove_every_day(&config, &gluster_snaps, &host_type);
+                rm_months_two = get_remove_months_with_two(&config, &gluster_snaps, &host_type);
             }
             else {
                 return Err(format!("Error getting snapshots: {}{}", String::from_utf8_lossy(&o.stdout),
@@ -217,6 +234,96 @@ pub fn remove_old_snapshots(config: &Config) -> Result<String, String> {
         Err(e) => return Err(format!("Error executing command: gluster snapshot list\n{}", e.to_string())),
     }
     Ok(snap_output)
+}
+
+
+/// Filters all snapshots done by ggsnap
+/// and returns an ordered vector.
+fn filter_gluster_snapshots(all_snaps: &String, config: &Config, host_type: &HostType) -> Vec<String> {
+    let mut snap_prefix = config.snapshot.snapshot_name_prefix.clone().unwrap();
+    let mut filtered_snaps: Vec<String> = Vec::new();
+
+    if *host_type == HostType::Master {
+        snap_prefix = format!("{}_{}_", snap_prefix, config.snapshot.master_volume.clone().unwrap());
+    }
+    else {
+        snap_prefix = format!("{}_{}_", snap_prefix, config.snapshot.slave_volume.clone().unwrap());
+    }
+
+    let snap_pre_parts: Vec<&str> = snap_prefix.split("_").collect();
+    let snap_pre_parts_len = snap_pre_parts.len();
+
+    for l in all_snaps.split("\n") {
+        if l.len() == (snap_prefix.len() + 15) && l.starts_with(&snap_prefix) {
+            let snap_parts: Vec<&str> = l.split("_").collect();
+
+            match snap_parts[snap_pre_parts_len-1].parse::<u32>() {
+                Ok(_) => {
+                    match snap_parts[snap_pre_parts_len].parse::<u32>() {
+                        Ok(_) => filtered_snaps.push(l.to_string()),
+                        Err(_) => (),
+                    }
+                },
+                Err(_) => (),
+            }
+        }
+    }
+
+    filtered_snaps.sort();
+    filtered_snaps
+}
+
+/// Returns all snapshots that should be deleted
+/// accordning to config setting number_days_every_day
+/// all_gluster_snaps should be the filtered list 
+/// containing only snapshots that is made by ggsnap.
+fn get_remove_every_day(config: &Config, all_gluster_snaps: &Vec<String>, host_type: &HostType) -> HashSet<String> {
+    let mut rm_snaps: HashSet<String> = HashSet::new();
+    let mut dt = Local::now();
+    let mut snap_pre: String = String::new();
+
+    for i in 1..config.snapshot.number_days_every_day + 1 {
+        if *host_type == HostType::Master {
+            snap_pre = format!("{}_{}_{}_", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                               config.snapshot.master_volume.clone().unwrap(), dt.format("%Y%m%d"));
+        }        
+        else {
+            snap_pre = format!("{}_{}_{}_", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                               config.snapshot.slave_volume.clone().unwrap(), dt.format("%Y%m%d"));
+        }
+
+        let found = all_gluster_snaps.iter().filter(|&& ref s| s.starts_with(&snap_pre));
+    
+        let mut found_sort: Vec<&String> = found.collect();
+        found_sort.sort_by(|a, b| b.cmp(a));
+        let mut found_iter = found_sort.iter();
+        found_iter.next();
+        
+        for &s in found_iter {
+            rm_snaps.insert(s.clone());
+        }
+
+        dt = dt + chrono::Duration::days(-1);
+    }
+
+    rm_snaps
+}
+
+/// Returns all snapshots that should be deleted
+/// accordning to config setting number_months_with_two
+/// all_gluster_snaps should be the filtered list 
+/// containing only snapshots that is made by ggsnap.
+fn get_remove_months_with_two(config: &Config, all_gluster_snaps: &Vec<String>, host_type: &HostType) -> HashSet<String> {
+    let mut rm_snaps: HashSet<String> = HashSet::new();
+    let mut snap_pre: String = String::new();
+    let mut dt = Local::today();
+    dt = dt + chrono::Duration::days(-((config.snapshot.number_days_every_day+1) as i64));
+    let mut dt2 = dt + chrono::Duration::weeks(-4);
+
+    println!("{:?}", dt);
+    println!("{:?}", dt2);
+
+    rm_snaps
 }
 
 #[cfg(test)]
