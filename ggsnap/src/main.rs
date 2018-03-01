@@ -46,12 +46,16 @@ fn main() {
             Ok(c) => c,
             Err((e, e_str)) => {
                 if e == ConfigReadErr::ConfigNotFound {
-                    println!("{:?}: Config file not found, using default values", e);
+                    println!("Master: {:?}: Config file not found, using default values", e);
                     config_file_exist = false;
                     Config::default_config()
                 }
+                else if e == ConfigReadErr::ConfigValueErr {
+                    println!("Master: {:?}: Parameter error in config file\n{}", e, e_str);
+                    std::process::exit(1);
+                }
                 else {
-                    println!("{:?}: Error reading config file\n{}", e, e_str);
+                    println!("Master: {:?}: Error reading config file\n{}", e, e_str);
                     std::process::exit(1);
                 }
             },

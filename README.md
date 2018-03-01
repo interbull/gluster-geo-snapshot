@@ -75,11 +75,16 @@ ggsnap_slave_bin = "/root/ggsnap_slave"
 # Number of days that snapshot should be saved every day from today
 number_days_every_day = 10
 
-# Number of months that two snapshot per month should be saved after days.
-number_months_with_two = 3
+# Number of weeks that one snapshot per week should be saved after days.
+number_weeks_with_one = 10
 
 # Number of months in total; the rest of the months one snapshot is saved
 number_months_total = 12
+
+# Value is optional, default value is: ggsnap
+# The prefix is concatenated with: _volume-name_YYYYMMDD_HHMMSS
+# that is the naming of the snapshot
+snapshot_name_prefix = "ggsnap"
 
 # All the following values are optional,
 # one or more values can be specified

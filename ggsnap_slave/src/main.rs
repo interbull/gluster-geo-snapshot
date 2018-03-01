@@ -43,6 +43,10 @@ fn main() {
                     config_file_exist = false;
                     Config::default_config()
                 }
+                else if e == ConfigReadErr::ConfigValueErr {
+                    println!("Slave: {:?}: Parameter error in config file\n{}", e, e_str);
+                    std::process::exit(1);
+                }
                 else {
                     println!("Slave: {:?}: Error reading config file\n{}", e, e_str);
                     std::process::exit(1);
