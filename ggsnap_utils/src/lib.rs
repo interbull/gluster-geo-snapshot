@@ -267,7 +267,7 @@ fn parse_config(config_content: &String) -> Result<Config, (ConfigReadErr, Strin
 
 /// Uses config file parameters in [snapshot]
 /// to deside what to save and what to delete
-/// On success a tring containing removed snapshots
+/// On success a String containing removed snapshots
 /// will be returned. On error, error message will be returned
 pub fn remove_old_snapshots(config: &Config, host_type: HostType) -> Result<String, String> {
     let mut snap_output: String = String::new();
@@ -354,7 +354,6 @@ fn get_remove_every_day(config: &Config, all_gluster_snaps: &Vec<String>, host_t
         }
 
         let found = all_gluster_snaps.iter().filter(|&& ref s| s.starts_with(&snap_pre));
-    
         let mut found_sort: Vec<&String> = found.collect();
         found_sort.sort_by(|a, b| b.cmp(a));
         let mut found_iter = found_sort.iter();
@@ -378,50 +377,48 @@ fn get_remove_weeks_with_one(config: &Config, all_gluster_snaps: &Vec<String>, h
     let mut rm_snaps: HashSet<String> = HashSet::new();
     let mut date = Local::today();
     date = date + chrono::Duration::days(-((config.snapshot.number_days_every_day) as i64));
-    let mut date_last = Local::today();
+    let mut date1 = Local::today();
+    let mut date2 = Local::today();
 
     if config.snapshot.number_weeks_with_one == 0 {
-        date_last = date.clone();
+        return rm_snaps;
     }
 
-//    if date.day() > DAY2_IN_MONTH {
-//        if config.snapshot.number_months_with_two == 1 {
-//            if date.month() == 1 {
-//                date_last = date.offset().ymd(date.year()-1, 12, 1);
-//            }
-//            else {
-//                date_last = date.offset().ymd(date.year(), date.month(), 1);
-//            }
-//        }
-//
-//        if config.snapshot.number_months_with_two - 1 < date.month() {
-//            date_last = date.offset().ymd(date.year(), date.month() - (config.snapshot.number_months_with_two - 1), date.day());
-//        }
-//        else {
-//            
-//        }
-//    }
+    for week_no in 0..config.snapshot.number_weeks_with_one {
+        date1 = date + chrono::Duration::weeks(-(week_no as i64));
+        date2 = date1 + chrono::Duration::days(-6);
 
-
-    let mut snap_first: String = String::new();
+        let mut snap_first: String = String::new();
+        let mut snap_last: String = String::new();
+        
+        if *host_type == HostType::Master {
+            snap_first = format!("{}_{}_{}_240000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                                config.snapshot.master_volume.clone().unwrap(), date1.format("%Y%m%d"));
+        }
+        else {
+            snap_first = format!("{}_{}_{}_240000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                                config.snapshot.slave_volume.clone().unwrap(), date1.format("%Y%m%d"));
+        }
     
-    if *host_type == HostType::Master {
-        snap_first = format!("{}_{}_{}_240000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
-                            config.snapshot.master_volume.clone().unwrap(), date.format("%Y%m%d"));
-    }
-    else {
-        snap_first = format!("{}_{}_{}_240000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
-                            config.snapshot.slave_volume.clone().unwrap(), date.format("%Y%m%d"));
-    }
+        if *host_type == HostType::Master {
+            snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                                config.snapshot.master_volume.clone().unwrap(), date2.format("%Y%m%d"));
+        }
+        else {
+            snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                                config.snapshot.slave_volume.clone().unwrap(), date2.format("%Y%m%d"));
+        }
+    
+    
+        let mut found: Vec<&String> = all_gluster_snaps.iter().filter(|&& ref s| *s < snap_first && *s > snap_last).collect();
 
-    let found = all_gluster_snaps.iter().filter(|&& ref s| *s < snap_first && *s > String::from("ggsnap_v_o_l_20180215_240000"));
+        found.sort_by(|a, b| b.cmp(a));
+        let test_save = found.pop();
 
-    println!("All older then ten days:");
-    println!("{}", snap_first);
-    for l in found {
-        println!("{}", l);
+        for l in found {
+            rm_snaps.insert(l.clone());
+        }
     }
-    println!("END");
 
     rm_snaps
 }
@@ -446,7 +443,7 @@ mod tests {
 
             [snapshot]
             number_days_every_day = 10
-            number_months_with_two = 3
+            number_weeks_with_one = 10
             number_months_total = 12
 
             [mail_from_master]
@@ -461,7 +458,7 @@ mod tests {
 
         let c = parse_config(&conf).unwrap();
         assert_eq!(c.general.ggsnap_slave_bin, "/root/ggsnap_slave");
-        assert_eq!(c.snapshot.number_months_with_two, 3);
+        assert_eq!(c.snapshot.number_weeks_with_one, 10);
         assert_eq!(c.mail_from_master.unwrap().enable, true);
 
         let conf = String::from("
@@ -471,7 +468,7 @@ mod tests {
 
             [snapshot]
             number_days_every_day = 10
-            number_months_with_two = 3
+            number_weeks_with_one = 10
             number_months_total = 12
             ");
 
@@ -564,7 +561,7 @@ ggsnap_v_o_l_{}_081011",
 
 
     #[test]
-    fn get_months_with_two() {
+    fn get_weeks_with_one() {
         let mut dates: Vec<String> = Vec::new();
         let d  = Local::today();
         dates.push(format!("{}", d.format("%Y%m%d")));
@@ -573,114 +570,73 @@ ggsnap_v_o_l_{}_081011",
             dates.push(format!("{}", (d + chrono::Duration::days(-i)).format("%Y%m%d")));
         }
 
-        let mut month1_1: String = String::from("");
-        let mut month1_2: String = String::from("");
-        let mut month1_3: String = String::from("");
-        let mut month2_1: String = String::from("");        
-        let mut month2_2: String = String::from("");
-        let mut month2_3: String = String::from("");
-        let mut month2_4: String = String::from("");
-        let mut month2_5: String = String::from("");
+        let mut week1_1: String = String::from("");
+        let mut week1_2: String = String::from("");
+        let mut week2_1: String = String::from("");
+        let mut week3_1: String = String::from("");        
+        let mut week3_2: String = String::from("");
+        let mut week3_3: String = String::from("");
+        let mut week4_1: String = String::from("");
+        let mut week5_1: String = String::from("");
+        let mut week6_1: String = String::from("");
+        let mut week7_1: String = String::from("");
+        let mut week8_1: String = String::from("");
+        let mut week8_2: String = String::from("");
+        let mut week8_3: String = String::from("");
+        let mut week8_4: String = String::from("");
+        let mut week9_1: String = String::from("");
+        let mut week10_1: String = String::from("");
+        let mut week11_1: String = String::from("");
+        let mut week11_2: String = String::from("");
         
-        let d2 = d + chrono::Duration::days(-10);
-        if d2.day() < 10 {
-            if d2.month() == 2 {
-                month1_1 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 10).format("%Y%m%d"));
-                month1_2 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 20).format("%Y%m%d"));
-                month1_3 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 27).format("%Y%m%d"));
-                month2_1 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 3).format("%Y%m%d"));
-                month2_2 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 6).format("%Y%m%d"));
-                month2_3 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 7).format("%Y%m%d"));
-                month2_4 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 9).format("%Y%m%d"));
-                month2_5 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 22).format("%Y%m%d"));
-            }
-            else if d2.month() == 1 {
-                month1_1 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 10).format("%Y%m%d"));
-                month1_2 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 20).format("%Y%m%d"));
-                month1_3 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 27).format("%Y%m%d"));
-                month2_1 = format!("{}", d2.offset().ymd(d2.year()-1, 11, 3).format("%Y%m%d"));
-                month2_2 = format!("{}", d2.offset().ymd(d2.year()-1, 11, 6).format("%Y%m%d"));
-                month2_3 = format!("{}", d2.offset().ymd(d2.year()-1, 11, 7).format("%Y%m%d"));
-                month2_4 = format!("{}", d2.offset().ymd(d2.year()-1, 11, 9).format("%Y%m%d"));
-                month2_5 = format!("{}", d2.offset().ymd(d2.year()-1, 11, 22).format("%Y%m%d"));
-            }
-            else {
-                month1_1 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 10).format("%Y%m%d"));
-                month1_2 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 20).format("%Y%m%d"));
-                month1_3 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 27).format("%Y%m%d"));
-                month2_1 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-2, 3).format("%Y%m%d"));
-                month2_2 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-2, 6).format("%Y%m%d"));
-                month2_3 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-2, 7).format("%Y%m%d"));
-                month2_4 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-2, 9).format("%Y%m%d"));
-                month2_5 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-2, 22).format("%Y%m%d"));
-            }
+        let d2 = d + chrono::Duration::days(-11);
+        let mut d3 = d2.clone();
 
-        }
-        else if d2.day() > 20 {
-            if d2.month() == 2 {
-                month1_1 = format!("{}", d2.offset().ymd(d2.year(), d2.month(), 10).format("%Y%m%d"));
-                month1_2 = format!("{}", d2.offset().ymd(d2.year(), d2.month(), 20).format("%Y%m%d"));
-                month1_3 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 27).format("%Y%m%d"));
-                month2_1 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 3).format("%Y%m%d"));
-                month2_2 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 6).format("%Y%m%d"));
-                month2_3 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 7).format("%Y%m%d"));
-                month2_4 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 9).format("%Y%m%d"));
-                month2_5 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 22).format("%Y%m%d"));
-            }
-            else if d2.month() == 1 {
-                month1_1 = format!("{}", d2.offset().ymd(d2.year(), d2.month(), 10).format("%Y%m%d"));
-                month1_2 = format!("{}", d2.offset().ymd(d2.year(), d2.month(), 20).format("%Y%m%d"));
-                month1_3 = format!("{}", d2.offset().ymd(d2.year(), d2.month(), 27).format("%Y%m%d"));
-                month2_1 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 3).format("%Y%m%d"));
-                month2_2 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 6).format("%Y%m%d"));
-                month2_3 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 7).format("%Y%m%d"));
-                month2_4 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 9).format("%Y%m%d"));
-                month2_5 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 22).format("%Y%m%d"));
-            }
-            else {
-                month1_1 = format!("{}", d2.offset().ymd(d2.year(), d2.month(), 10).format("%Y%m%d"));
-                month1_2 = format!("{}", d2.offset().ymd(d2.year(), d2.month(), 20).format("%Y%m%d"));
-                month1_3 = format!("{}", d2.offset().ymd(d2.year(), d2.month(), 27).format("%Y%m%d"));
-                month2_1 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 3).format("%Y%m%d"));
-                month2_2 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 6).format("%Y%m%d"));
-                month2_3 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 7).format("%Y%m%d"));
-                month2_4 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 9).format("%Y%m%d"));
-                month2_5 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 22).format("%Y%m%d"));
-            }
-
-        }
-        else {
-            if d2.month() == 2 {
-                month1_1 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 12).format("%Y%m%d"));
-                month1_2 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 20).format("%Y%m%d"));
-                month1_3 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 10).format("%Y%m%d"));
-                month2_1 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 12).format("%Y%m%d"));
-                month2_2 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 14).format("%Y%m%d"));
-                month2_3 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 15).format("%Y%m%d"));
-                month2_4 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 17).format("%Y%m%d"));
-                month2_5 = format!("{}", d2.offset().ymd(d2.year()-1, 11, 10).format("%Y%m%d"));
-            }
-            else if d2.month() == 1 {
-                month1_1 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 12).format("%Y%m%d"));
-                month1_2 = format!("{}", d2.offset().ymd(d2.year()-1, 12, 20).format("%Y%m%d"));
-                month1_3 = format!("{}", d2.offset().ymd(d2.year()-1, 11, 10).format("%Y%m%d"));
-                month2_1 = format!("{}", d2.offset().ymd(d2.year()-1, 11, 12).format("%Y%m%d"));
-                month2_2 = format!("{}", d2.offset().ymd(d2.year()-1, 11, 14).format("%Y%m%d"));
-                month2_3 = format!("{}", d2.offset().ymd(d2.year()-1, 11, 15).format("%Y%m%d"));
-                month2_4 = format!("{}", d2.offset().ymd(d2.year()-1, 11, 17).format("%Y%m%d"));
-                month2_5 = format!("{}", d2.offset().ymd(d2.year()-1, 10, 10).format("%Y%m%d"));
-            }
-            else {
-                month1_1 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 12).format("%Y%m%d"));
-                month1_2 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-1, 20).format("%Y%m%d"));
-                month1_3 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-2, 10).format("%Y%m%d"));
-                month2_1 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-2, 12).format("%Y%m%d"));
-                month2_2 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-2, 14).format("%Y%m%d"));
-                month2_3 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-2, 15).format("%Y%m%d"));
-                month2_4 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-2, 17).format("%Y%m%d"));
-                month2_5 = format!("{}", d2.offset().ymd(d2.year(), d2.month()-3, 10).format("%Y%m%d"));
-            }
-        }
+        week1_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d3 + chrono::Duration::days(-2);
+        week1_2 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-1);
+        d3 = d3 + chrono::Duration::days(-4);
+        week2_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-2);
+        d3 = d3 + chrono::Duration::days(-1);
+        week3_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));        
+        d3 = d3 + chrono::Duration::days(-4);
+        week3_2 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d3 + chrono::Duration::days(-5);
+        week3_3 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-3);
+        d3 = d3 + chrono::Duration::days(-2);
+        week4_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-4);
+        d3 = d3 + chrono::Duration::days(-6);
+        week5_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-5);
+        d3 = d3 + chrono::Duration::days(-1);
+        week6_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-6);
+        d3 = d3 + chrono::Duration::days(-1);
+        week7_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-7);
+        d3 = d3 + chrono::Duration::days(-1);
+        week8_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d3 + chrono::Duration::days(-2);
+        week8_2 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d3 + chrono::Duration::days(-3);
+        week8_3 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d3 + chrono::Duration::days(-5);
+        week8_4 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-8);
+        d3 = d3 + chrono::Duration::days(-4);
+        week9_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-9);
+        d3 = d3 + chrono::Duration::days(-2);
+        week10_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-10);
+        d3 = d3 + chrono::Duration::days(-3);
+        week11_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d3 + chrono::Duration::days(-5);
+        week11_2 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
 
         let mut config = Config::default_config();
         config.snapshot.slave_volume = Some(String::from("v_o_l"));
@@ -715,6 +671,16 @@ ggsnap_v_o_l_{}_085228
 ggsnap_v_o_l_{}_081011
 ggsnap_v_o_l_{}_121011
 ggsnap_v_o_l_{}_115228
+ggsnap_v_o_l_{}_165228
+ggsnap_v_o_l_{}_031034
+ggsnap_v_o_l_{}_122311
+ggsnap_v_o_l_{}_091011
+ggsnap_v_o_l_{}_051011
+ggsnap_v_o_l_{}_221011
+ggsnap_v_o_l_{}_191011
+ggsnap_v_o_l_{}_165228
+ggsnap_v_o_l_{}_141034
+ggsnap_v_o_l_{}_124311
 ggsnap_v_o_l_{}_041011
 ggsnap_v_o_l_{}_051011
 ggsnap_v_o_l_{}_061011
@@ -726,37 +692,41 @@ ggsnap_v_o_l_{}_115228",
             dates[1], dates[1], dates[1], dates[1], dates[2], dates[2], dates[3], dates[3], dates[3], dates[3],
             dates[4], dates[5], dates[6], dates[7], dates[7], dates[8], dates[8], dates[8], dates[8], dates[8],
             dates[9], dates[9], dates[9], dates[9], dates[9], dates[10], dates[10], dates[11], dates[11], dates[11],
-            month1_1, month1_2, month1_3, month2_1, month2_2, month2_3, month2_4, month2_5);
+            week1_1, week1_2, week2_1, week3_1, week3_2, week3_3, week4_1, week5_1, week6_1, week7_1, week8_1, 
+            week8_2, week8_3, week8_4, week9_1, week10_1, week11_1, week11_2);
+
 
         let mut snaps: Vec<String> = Vec::new();
         for l in s.split("\n") {
             snaps.push(l.to_string());
         }
         snaps.sort();
+        
         let mut res: HashSet<String> = HashSet::new();
         let mut r: String = String::new();
-        if d2.day() < 10 || d2.day() > 20 {
-            r = format!(
-"ggsnap_v_o_l_{}_151810
-ggsnap_v_o_l_{}_101811
-ggsnap_v_o_l_{}_091811
-ggsnap_v_o_l_{}_081011",
-                month1_3, month2_1, month2_2, month2_3);
-        }
-        else {
-            r = format!(
-"ggsnap_v_o_l_{}_151810
-ggsnap_v_o_l_{}_101811
-ggsnap_v_o_l_{}_091811
-ggsnap_v_o_l_{}_081011",
-                month1_1, month1_3, month2_2, month2_3);
-        }
+        r = format!(
+"ggsnap_v_o_l_{}_081011
+ggsnap_v_o_l_{}_085228
+ggsnap_v_o_l_{}_081011
+ggsnap_v_o_l_{}_121011
+ggsnap_v_o_l_{}_115228
+ggsnap_v_o_l_{}_165228
+ggsnap_v_o_l_{}_091011
+ggsnap_v_o_l_{}_191011
+ggsnap_v_o_l_{}_165228
+ggsnap_v_o_l_{}_041011
+ggsnap_v_o_l_{}_061011
+ggsnap_v_o_l_{}_085228", 
+            dates[10], dates[10], dates[11], dates[11], dates[11],
+            week1_1, week3_1, week4_1, week5_1, week8_1, week8_3, week8_4);
+
         for l in r.split("\n") {
             res.insert(l.to_string());
         }
 
 
-        let days = get_remove_months_with_two(&config, &snaps, &HostType::Slave);
+        let days = get_remove_weeks_with_one(&config, &snaps, &HostType::Slave);
+        assert!(days.len() > 0);
         assert_eq!(days.difference(&res).count(), 0);
     }
 }
