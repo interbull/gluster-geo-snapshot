@@ -363,10 +363,9 @@ fn create_slave_snapshot(config: &Config, snap_name: &String) -> Result<String, 
 /// Removes old snapshot from master node according 
 /// to settings in config file.
 fn remove_old_snapshots(config: &Config) -> Result<String, String>{
-    //TODO
     let mut log = String::from("Master: Removing old snapshots");
 
-    match ggsnap_utils::remove_old_snapshots(config) {
+    match ggsnap_utils::remove_old_snapshots(config, ggsnap_utils::HostType::Master) {
         Ok(s) => {
             log = format!("{}\nMaster: The following snapshots has been removed:\n{}", log, s);
             Ok(format!("{}\nMaster: End of removing snapshots", log))
@@ -375,8 +374,16 @@ fn remove_old_snapshots(config: &Config) -> Result<String, String>{
     }
 }
 
-fn remove_old_slave_snapshots() {
+fn remove_old_slave_snapshots(config: &Config) {
     //TODO
+    let cmd_out = Command::new("/bin/ssh")
+                          .arg(&config.snapshot.slave_hostname.clone().unwrap())
+                          .arg(&config.general.ggsnap_slave_bin)
+                          .arg("--remove-snapshots")
+                          .arg("--volume")
+                          .arg(&config.snapshot.slave_volume.clone().unwrap())
+                          .output();
+
 }
 
 /// Print statistics for both master snapshots

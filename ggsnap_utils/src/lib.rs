@@ -27,6 +27,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::process::Command;
 use std::collections::HashSet;
+use std::iter::FromIterator;
 use chrono::prelude::*;
 
 static CONF_FILE: &'static str = "ggsnap.conf";
@@ -272,8 +273,12 @@ fn parse_config(config_content: &String) -> Result<Config, (ConfigReadErr, Strin
 pub fn remove_old_snapshots(config: &Config, host_type: HostType) -> Result<String, String> {
     let mut snap_output: String = String::new();
     let mut gluster_snaps: Vec<String> = Vec::new();
-    let mut rm_every_day: HashSet<String> = HashSet::new();
-    let mut rm_weeks_one: HashSet<String> = HashSet::new();
+    let mut rm_every_day: Vec<String> = Vec::new();
+    let mut rm_weeks_one: Vec<String> = Vec::new();
+    let mut rm_months_total: Vec<String> = Vec::new();
+    let mut rm_tot: Vec<String> = Vec::new();
+    let mut rm_tot_res: String = String::new();
+    let mut del_err: bool = false;
     let cmd_out = Command::new(&config.general.gluster_bin)
                           .arg("snapshot")
                           .arg("list")
@@ -284,8 +289,87 @@ pub fn remove_old_snapshots(config: &Config, host_type: HostType) -> Result<Stri
             if o.status.success() {
                 snap_output = format!("{}", String::from_utf8_lossy(&o.stdout));
                 gluster_snaps = filter_gluster_snapshots(&snap_output, &config, &host_type);
+
                 rm_every_day = get_remove_every_day(&config, &gluster_snaps, &host_type);
+                rm_tot.extend(rm_every_day);
                 rm_weeks_one = get_remove_weeks_with_one(&config, &gluster_snaps, &host_type);
+                rm_tot.extend(rm_weeks_one);
+                rm_months_total = get_remove_months_total(&config, &gluster_snaps, &host_type);
+                rm_tot.extend(rm_months_total);
+                rm_tot.sort();
+
+                for l in rm_tot {
+                    let rm_out = Command::new(&config.general.gluster_bin)
+                                         .arg("snapshot")
+                                         .arg("delete")
+                                         .arg(&l)
+                                         .output();
+
+                    match rm_out {
+                        Ok(o) => {
+                            if o.status.success() {
+                                if rm_tot_res.len() == 0 {
+                                    if host_type == HostType::Master {
+                                        rm_tot_res = format!("Master: {}", l);
+                                    }
+                                    else {
+                                        rm_tot_res = format!("Slave: {}", l);
+                                    }
+                                }
+                                else {
+                                    if host_type == HostType::Master {
+                                        rm_tot_res = format!("{}\nMaster: {}", rm_tot_res, l);
+                                    }
+                                    else {
+                                        rm_tot_res = format!("{}\nSlave: {}", rm_tot_res, l);
+                                    }
+                                }
+                            }
+                            else {
+                                del_err = true;
+                                if rm_tot_res.len() == 0 {
+                                    if host_type == HostType::Master {
+                                        rm_tot_res = format!("Master: Error deleting snapshot: {}\nMaster: {}{}", l, 
+                                                             String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+                                    }
+                                    else {
+                                        rm_tot_res = format!("Slave: Error deleting snapshot: {}\nSlave: {}{}", l, 
+                                                             String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+                                    }
+                                }
+                                else {
+                                    if host_type == HostType::Master {
+                                        rm_tot_res = format!("{}\nMaster: Error deleting snapshot: {}\nMaster: {}{}", rm_tot_res, l, 
+                                                             String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+                                    }
+                                    else {
+                                        rm_tot_res = format!("{}\nSlave: Error deleting snapshot: {}\nSlave: {}{}", rm_tot_res, l, 
+                                                             String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+                                    }
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            del_err = true;
+                            if rm_tot_res.len() == 0 {
+                                if host_type == HostType::Master {
+                                    rm_tot_res = format!("Master: Error executing delete snapshot: {}\nMaster: {}", l, e.to_string());
+                                }
+                                else {
+                                    rm_tot_res = format!("Slave: Error executing delete snapshot: {}\nSlave: {}", l, e.to_string());
+                                }
+                            }
+                            else {
+                                if host_type == HostType::Master {
+                                    rm_tot_res = format!("{}\nMaster: Error executing delete snapshot: {}\nMaster: {}", rm_tot_res, l, e.to_string());
+                                }
+                                else {
+                                    rm_tot_res = format!("{}\nSlave: Error executing delete snapshot: {}\nSlave: {}", rm_tot_res, l, e.to_string());
+                                }
+                            }
+                        },
+                    }
+                }
             }
             else {
                 return Err(format!("Error getting snapshots: {}{}", String::from_utf8_lossy(&o.stdout),
@@ -294,7 +378,13 @@ pub fn remove_old_snapshots(config: &Config, host_type: HostType) -> Result<Stri
         },
         Err(e) => return Err(format!("Error executing command: gluster snapshot list\n{}", e.to_string())),
     }
-    Ok(snap_output)
+
+    if del_err {
+        Err(rm_tot_res)
+    }
+    else {
+        Ok(rm_tot_res)
+    }
 }
 
 
@@ -338,7 +428,7 @@ fn filter_gluster_snapshots(all_snaps: &String, config: &Config, host_type: &Hos
 /// accordning to config setting number_days_every_day
 /// all_gluster_snaps should be the filtered list 
 /// containing only snapshots that is made by ggsnap.
-fn get_remove_every_day(config: &Config, all_gluster_snaps: &Vec<String>, host_type: &HostType) -> HashSet<String> {
+fn get_remove_every_day(config: &Config, all_gluster_snaps: &Vec<String>, host_type: &HostType) -> Vec<String> {
     let mut rm_snaps: HashSet<String> = HashSet::new();
     let mut dt = Local::now();
     let mut snap_pre: String = String::new();
@@ -366,14 +456,14 @@ fn get_remove_every_day(config: &Config, all_gluster_snaps: &Vec<String>, host_t
         dt = dt + chrono::Duration::days(-1);
     }
 
-    rm_snaps
+    Vec::from_iter(rm_snaps)
 }
 
 /// Returns all snapshots that should be deleted
 /// accordning to config setting number_weeks_with_one
 /// all_gluster_snaps should be the filtered list 
 /// containing only snapshots that is made by ggsnap.
-fn get_remove_weeks_with_one(config: &Config, all_gluster_snaps: &Vec<String>, host_type: &HostType) -> HashSet<String> {
+fn get_remove_weeks_with_one(config: &Config, all_gluster_snaps: &Vec<String>, host_type: &HostType) -> Vec<String> {
     let mut rm_snaps: HashSet<String> = HashSet::new();
     let mut date = Local::today();
     date = date + chrono::Duration::days(-((config.snapshot.number_days_every_day) as i64));
@@ -381,7 +471,7 @@ fn get_remove_weeks_with_one(config: &Config, all_gluster_snaps: &Vec<String>, h
     let mut date2 = Local::today();
 
     if config.snapshot.number_weeks_with_one == 0 {
-        return rm_snaps;
+        return Vec::new();
     }
 
     for week_no in 0..config.snapshot.number_weeks_with_one {
@@ -413,15 +503,149 @@ fn get_remove_weeks_with_one(config: &Config, all_gluster_snaps: &Vec<String>, h
         let mut found: Vec<&String> = all_gluster_snaps.iter().filter(|&& ref s| *s < snap_first && *s > snap_last).collect();
 
         found.sort_by(|a, b| b.cmp(a));
-        let test_save = found.pop();
+        found.pop();
 
         for l in found {
             rm_snaps.insert(l.clone());
         }
     }
 
-    rm_snaps
+    Vec::from_iter(rm_snaps)
 }
+
+
+/// Returns all snapshots that should be deleted
+/// accordning to config setting number_months_total
+/// all_gluster_snaps should be the filtered list 
+/// containing only snapshots that is made by ggsnap.
+fn get_remove_months_total(config: &Config, all_gluster_snaps: &Vec<String>, host_type: &HostType) -> Vec<String> {
+    let mut rm_snaps: HashSet<String> = HashSet::new();
+    let mut last_month = Local::today();
+    let mut month_start = Local::today();
+    let mut month_end = Local::today();
+    
+    month_start = month_start + chrono::Duration::days(-(config.snapshot.number_days_every_day as i64));
+    month_start = month_start + chrono::Duration::weeks(-(config.snapshot.number_weeks_with_one as i64));
+    month_end = Local.ymd(month_start.year(), month_start.month(), 1);
+
+    let mut year = last_month.year() - ((config.snapshot.number_months_total/12) as i32);
+    let mut month = last_month.month() - (config.snapshot.number_months_total%12);
+    let mut day = last_month.day();
+    let months_30 = vec!(4, 6, 9, 11);
+    let mut snap_first: String = String::new();
+    let mut snap_last: String = String::new();
+
+    if month < 1 {
+        year = year -1;
+        month = month + 12;
+    }
+
+    if month != 2 {
+        if months_30.contains(&month) && day > 30 {
+            day = 30;
+        }
+    }
+    else {
+        if year%4 == 0 && day > 29 {
+            day = 29;
+        }
+        else if day > 28 {
+            day = 28;
+        }
+    }
+
+    last_month = Local.ymd(year, month, day);
+
+    if *host_type == HostType::Master {
+        snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                            config.snapshot.master_volume.clone().unwrap(), last_month.format("%Y%m%d"));
+    }
+    else {
+        snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                            config.snapshot.slave_volume.clone().unwrap(), last_month.format("%Y%m%d"));
+    }
+
+    let old_snaps: Vec<&String> = all_gluster_snaps.iter().filter(|&& ref s| *s < snap_last).collect();
+
+    for o in old_snaps {
+        rm_snaps.insert(o.clone().to_string());
+    }
+
+    loop {
+        if month_start.year() < last_month.year() ||
+           (month_start.year() == last_month.year() &&
+            month_start.month() < last_month.month()) {
+               break;
+        }
+
+        if *host_type == HostType::Master {
+            snap_first = format!("{}_{}_{}_240000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                                 config.snapshot.master_volume.clone().unwrap(), month_start.format("%Y%m%d"));
+        }
+        else {
+            snap_first = format!("{}_{}_{}_240000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                                 config.snapshot.slave_volume.clone().unwrap(), month_start.format("%Y%m%d"));
+        }
+    
+        if *host_type == HostType::Master {
+            snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                                config.snapshot.master_volume.clone().unwrap(), month_end.format("%Y%m%d"));
+        }
+        else {
+            snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                                config.snapshot.slave_volume.clone().unwrap(), month_end.format("%Y%m%d"));
+        }
+
+
+        let mut all_in_month: Vec<&String> = all_gluster_snaps.iter().filter(|&& ref s| *s < snap_first && *s > snap_last).collect();
+
+        all_in_month.sort_by(|a, b| b.cmp(a));
+        all_in_month.pop();
+
+        for s in all_in_month {
+            rm_snaps.insert(s.clone().to_string());
+        }
+
+        let mut y = month_end.year();
+        let mut m = month_end.month();
+        let mut d = 1;
+
+        if m == 1 {
+            y -= 1;
+            m = 12;
+        }
+        else {
+            m -= 1;
+        }
+
+        month_end = Local.ymd(y, m, d);
+
+        if month_end.year() == last_month.year() &&
+           month_end.month() == last_month.month() {
+            month_end = last_month;
+        }
+
+        let mut d = 31;
+
+        if months_30.contains(&month_end.month()) {
+            d = 30;
+        }
+        else if month_end.month() == 2 && month_end.year()%4 == 0 {
+            d = 29;
+        }
+        else if month_end.month() == 2 {
+            d = 28;
+        }
+
+        month_start = Local.ymd(month_end.year(), month_end.month(), d);
+
+    }
+    println!("{:?}", rm_snaps);
+
+    Vec::from_iter(rm_snaps)
+
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -490,8 +714,7 @@ mod tests {
         let mut config = Config::default_config();
         config.snapshot.slave_volume = Some(String::from("v_o_l"));
         let s = format!(
-"
-ggsnap_v_o_l_{}_151810
+"ggsnap_v_o_l_{}_151810
 ggsnap_v_o_l_{}_151811
 ggsnap_v_o_l_{}_101811
 ggsnap_v_o_l_{}_091811
@@ -529,10 +752,9 @@ ggsnap_v_o_l_{}_115228",
             snaps.push(l.to_string());
         }
         snaps.sort();
-        let mut res: HashSet<String> = HashSet::new();
+        let mut res: Vec<String> = Vec::new();
         let r: String = format!(
-"
-ggsnap_v_o_l_{}_151810
+"ggsnap_v_o_l_{}_151810
 ggsnap_v_o_l_{}_101811
 ggsnap_v_o_l_{}_091811
 ggsnap_v_o_l_{}_081011
@@ -547,16 +769,17 @@ ggsnap_v_o_l_{}_221011
 ggsnap_v_o_l_{}_011011
 ggsnap_v_o_l_{}_041011
 ggsnap_v_o_l_{}_051011
-ggsnap_v_o_l_{}_061011
-ggsnap_v_o_l_{}_081011",
+ggsnap_v_o_l_{}_061011",
             dates[1], dates[1], dates[1], dates[2], dates[3], dates[3], dates[3], dates[7], dates[8], 
-            dates[8], dates[8], dates[8], dates[9], dates[9], dates[9], dates[9], dates[10]);
+            dates[8], dates[8], dates[8], dates[9], dates[9], dates[9], dates[9]); 
         for l in r.split("\n") {
-            res.insert(l.to_string());
+            res.push(l.to_string());
         }
 
-        let days = get_remove_every_day(&config, &snaps, &HostType::Slave);
-        assert_eq!(days.difference(&res).count(), 0);
+        let mut days = get_remove_every_day(&config, &snaps, &HostType::Slave);
+        days.sort();
+        res.sort();
+        assert_eq!(days, res);
     }
 
 
@@ -702,7 +925,7 @@ ggsnap_v_o_l_{}_115228",
         }
         snaps.sort();
         
-        let mut res: HashSet<String> = HashSet::new();
+        let mut res: Vec<String> = Vec::new();
         let mut r: String = String::new();
         r = format!(
 "ggsnap_v_o_l_{}_081011
@@ -721,12 +944,366 @@ ggsnap_v_o_l_{}_085228",
             week1_1, week3_1, week4_1, week5_1, week8_1, week8_3, week8_4);
 
         for l in r.split("\n") {
-            res.insert(l.to_string());
+            res.push(l.to_string());
         }
 
 
-        let days = get_remove_weeks_with_one(&config, &snaps, &HostType::Slave);
-        assert!(days.len() > 0);
-        assert_eq!(days.difference(&res).count(), 0);
+        let mut days = get_remove_weeks_with_one(&config, &snaps, &HostType::Slave);
+        days.sort();
+        res.sort();
+
+        assert_eq!(days, res);
+    }
+
+
+    #[test]
+    fn get_total_length() {
+        let mut dates: Vec<String> = Vec::new();
+        let d  = Local::today();
+        dates.push(format!("{}", d.format("%Y%m%d")));
+
+        for i in 1..12 {
+            dates.push(format!("{}", (d + chrono::Duration::days(-i)).format("%Y%m%d")));
+        }
+
+        let mut week1_1: String = String::from("");
+        let mut week1_2: String = String::from("");
+        let mut week2_1: String = String::from("");
+        let mut week3_1: String = String::from("");        
+        let mut week3_2: String = String::from("");
+        let mut week3_3: String = String::from("");
+        let mut week4_1: String = String::from("");
+        let mut week5_1: String = String::from("");
+        let mut week6_1: String = String::from("");
+        let mut week7_1: String = String::from("");
+        let mut week8_1: String = String::from("");
+        let mut week8_2: String = String::from("");
+        let mut week8_3: String = String::from("");
+        let mut week8_4: String = String::from("");
+        let mut week9_1: String = String::from("");
+        let mut week10_1: String = String::from("");
+        let mut week11_1: String = String::from("");
+        let mut week11_2: String = String::from("");
+        let mut month2_1: String = String::from("");
+        let mut month2_2: String = String::from("");
+        let mut month2_3: String = String::from("");        
+        let mut month4_1: String = String::from("");
+        let mut month5_1: String = String::from("");
+        let mut month6_1: String = String::from("");
+        let mut month7_1: String = String::from("");
+        let mut month7_2: String = String::from("");
+        let mut month7_3: String = String::from("");
+        let mut month7_4: String = String::from("");
+        let mut month8_1: String = String::from("");
+        let mut month9_1: String = String::from("");
+        let mut month10_1: String = String::from("");
+        let mut month11_1: String = String::from("");
+        let mut month12_1: String = String::from("");
+        let mut month13_1: String = String::from("");
+        let mut month14_1: String = String::from("");
+        let mut month14_2: String = String::from("");
+        let mut month14_3: String = String::from("");
+
+        let d2 = d + chrono::Duration::days(-11);
+        let mut d3 = d2.clone();
+
+        week1_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d3 + chrono::Duration::days(-2);
+        week1_2 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-1);
+        d3 = d3 + chrono::Duration::days(-4);
+        week2_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-2);
+        d3 = d3 + chrono::Duration::days(-1);
+        week3_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));        
+        d3 = d3 + chrono::Duration::days(-4);
+        week3_2 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d3 + chrono::Duration::days(-5);
+        week3_3 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-3);
+        d3 = d3 + chrono::Duration::days(-2);
+        week4_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-4);
+        d3 = d3 + chrono::Duration::days(-6);
+        week5_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-5);
+        d3 = d3 + chrono::Duration::days(-1);
+        week6_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-6);
+        d3 = d3 + chrono::Duration::days(-1);
+        week7_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-7);
+        d3 = d3 + chrono::Duration::days(-1);
+        week8_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d3 + chrono::Duration::days(-2);
+        week8_2 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d3 + chrono::Duration::days(-3);
+        week8_3 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d3 + chrono::Duration::days(-5);
+        week8_4 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-8);
+        d3 = d3 + chrono::Duration::days(-4);
+        week9_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-9);
+        d3 = d3 + chrono::Duration::days(-2);
+        week10_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d2 + chrono::Duration::weeks(-10);
+        d3 = d3 + chrono::Duration::days(-3);
+        week11_1 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        d3 = d3 + chrono::Duration::days(-5);
+        week11_2 = format!("{}", d3.offset().ymd(d3.year(), d3.month(), d3.day()).format("%Y%m%d"));
+        let mut y = d3.year();
+        let mut m = d3.month();
+        let mut d = 14;
+
+        m -= 1;
+        if m > 1 {
+            month2_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        else {
+            y -= 1;
+            m = 12;
+            month2_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        month2_2 = Local.ymd(y, m, 8).format("%Y%m%d").to_string();
+        month2_3 = Local.ymd(y, m, 3).format("%Y%m%d").to_string();
+        month2_3 = Local.ymd(y, m, 3).format("%Y%m%d").to_string();
+
+        m -= 2;
+        if m > 2 {
+            month4_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        else if m == 1{
+            y -= 1;
+            m = 11;
+            month4_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        else {
+            y -= 1;
+            m = 12;
+            month4_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+
+        m -= 1;
+        if m > 1 {
+            month5_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        else {
+            y -= 1;
+            m = 12;
+            month5_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+
+
+        m -= 1;
+        if m > 1 {
+            month6_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        else {
+            y -= 1;
+            m = 12;
+            month6_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+
+        m -= 1;
+        if m > 1 {
+            month7_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        else {
+            y -= 1;
+            m = 12;
+            month7_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        month7_2 = Local.ymd(y, m, 12).format("%Y%m%d").to_string();
+        month7_3 = Local.ymd(y, m, 9).format("%Y%m%d").to_string();
+        month7_4 = Local.ymd(y, m, 1).format("%Y%m%d").to_string();
+
+        m -= 1;
+        if m > 1 {
+            month8_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        else {
+            y -= 1;
+            m = 12;
+            month8_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+
+        m -= 1;
+        if m > 1 {
+            month9_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        else {
+            y -= 1;
+            m = 12;
+            month9_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+
+        m -= 1;
+        if m > 1 {
+            month10_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        else {
+            y -= 1;
+            m = 12;
+            month10_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+
+        m -= 1;
+        if m > 1 {
+            month11_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        else {
+            y -= 1;
+            m = 12;
+            month11_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+
+        m -= 1;
+        if m > 1 {
+            month12_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        else {
+            y -= 1;
+            m = 12;
+            month12_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+
+        m -= 1;
+        if m > 1 {
+            month13_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        else {
+            y -= 1;
+            m = 12;
+            month13_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+
+        m -= 1;
+        if m > 1 {
+            month14_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+        else {
+            y -= 1;
+            m = 12;
+            month14_1 = Local.ymd(y, m, d).format("%Y%m%d").to_string();
+        }
+
+        month14_2 = Local.ymd(y, m, 11).format("%Y%m%d").to_string();
+        month14_2 = Local.ymd(y, m, 8).format("%Y%m%d").to_string();
+        month14_3 = Local.ymd(y, m, 2).format("%Y%m%d").to_string();
+
+        let mut config = Config::default_config();
+        config.snapshot.slave_volume = Some(String::from("v_o_l"));
+        let s = format!(
+"ggsnap_v_o_l_{}_151810
+ggsnap_v_o_l_{}_151811
+ggsnap_v_o_l_{}_101811
+ggsnap_v_o_l_{}_091811
+ggsnap_v_o_l_{}_131011
+ggsnap_v_o_l_{}_081011
+ggsnap_v_o_l_{}_111011
+ggsnap_v_o_l_{}_001011
+ggsnap_v_o_l_{}_091011
+ggsnap_v_o_l_{}_230000
+ggsnap_v_o_l_{}_091011
+ggsnap_v_o_l_{}_091011
+ggsnap_v_o_l_{}_091011
+ggsnap_v_o_l_{}_181011
+ggsnap_v_o_l_{}_141011
+ggsnap_v_o_l_{}_141011
+ggsnap_v_o_l_{}_101011
+ggsnap_v_o_l_{}_191011
+ggsnap_v_o_l_{}_221011
+ggsnap_v_o_l_{}_231011
+ggsnap_v_o_l_{}_231011
+ggsnap_v_o_l_{}_011011
+ggsnap_v_o_l_{}_041011
+ggsnap_v_o_l_{}_051011
+ggsnap_v_o_l_{}_061011
+ggsnap_v_o_l_{}_081011
+ggsnap_v_o_l_{}_085228
+ggsnap_v_o_l_{}_081011
+ggsnap_v_o_l_{}_121011
+ggsnap_v_o_l_{}_115228
+ggsnap_v_o_l_{}_165228
+ggsnap_v_o_l_{}_031034
+ggsnap_v_o_l_{}_122311
+ggsnap_v_o_l_{}_091011
+ggsnap_v_o_l_{}_051011
+ggsnap_v_o_l_{}_221011
+ggsnap_v_o_l_{}_191011
+ggsnap_v_o_l_{}_165228
+ggsnap_v_o_l_{}_141034
+ggsnap_v_o_l_{}_124311
+ggsnap_v_o_l_{}_041011
+ggsnap_v_o_l_{}_051011
+ggsnap_v_o_l_{}_061011
+ggsnap_v_o_l_{}_081011
+ggsnap_v_o_l_{}_085228
+ggsnap_v_o_l_{}_081034
+ggsnap_v_o_l_{}_121011
+ggsnap_v_o_l_{}_115228
+ggsnap_v_o_l_{}_165228
+ggsnap_v_o_l_{}_031034
+ggsnap_v_o_l_{}_122311
+ggsnap_v_o_l_{}_091011
+ggsnap_v_o_l_{}_051011
+ggsnap_v_o_l_{}_221011
+ggsnap_v_o_l_{}_191011
+ggsnap_v_o_l_{}_165228
+ggsnap_v_o_l_{}_141034
+ggsnap_v_o_l_{}_124311
+ggsnap_v_o_l_{}_041011
+ggsnap_v_o_l_{}_051011
+ggsnap_v_o_l_{}_061011
+ggsnap_v_o_l_{}_081011
+ggsnap_v_o_l_{}_085228
+ggsnap_v_o_l_{}_081034
+ggsnap_v_o_l_{}_121011
+ggsnap_v_o_l_{}_115228
+ggsnap_v_o_l_{}_115228", 
+            dates[1], dates[1], dates[1], dates[1], dates[2], dates[2], dates[3], dates[3], dates[3], dates[3],
+            dates[4], dates[5], dates[6], dates[7], dates[7], dates[8], dates[8], dates[8], dates[8], dates[8],
+            dates[9], dates[9], dates[9], dates[9], dates[9], dates[10], dates[10], dates[11], dates[11], dates[11],
+            week1_1, week1_2, week2_1, week3_1, week3_2, week3_3, week4_1, week5_1, week6_1, week7_1, week8_1, 
+            week8_2, week8_3, week8_4, week9_1, week10_1, week11_1, week11_2, month2_1, month2_2, month2_3, month4_1,
+            month5_1, month6_1, month7_1, month7_2, month7_3, month7_4, month8_1, month9_1, month10_1, month11_1, 
+            month12_1, month13_1, month14_1, month14_2, month14_3);
+        //test
+//        assert_eq!(s, String::new());
+
+        let mut snaps: Vec<String> = Vec::new();
+        for l in s.split("\n") {
+            snaps.push(l.to_string());
+        }
+        snaps.sort();
+        
+        let mut res: Vec<String> = Vec::new();
+        let mut r: String = String::new();
+        r = format!(
+"ggsnap_v_o_l_{}_121011
+ggsnap_v_o_l_{}_031034
+ggsnap_v_o_l_{}_165228
+ggsnap_v_o_l_{}_165228
+ggsnap_v_o_l_{}_141034
+ggsnap_v_o_l_{}_191011
+ggsnap_v_o_l_{}_081034
+ggsnap_v_o_l_{}_121011
+ggsnap_v_o_l_{}_115228
+ggsnap_v_o_l_{}_115228
+ggsnap_v_o_l_{}_085228
+ggsnap_v_o_l_{}_081011", 
+            week11_1, month2_2, month2_1, month7_2, month7_3, month7_1, month13_1, month14_1, month14_2, month14_3, month12_1, month11_1);
+
+        for l in r.split("\n") {
+            res.push(l.to_string());
+        }
+
+
+        let mut days = get_remove_months_total(&config, &snaps, &HostType::Slave);
+        days.sort();
+        res.sort();
+
+        assert_eq!(days, res);
     }
 }
