@@ -51,7 +51,8 @@ impl Config {
         Config {
             general: General {
                 gluster_bin: String::from("/usr/sbin/gluster"),
-                ggsnap_slave_bin: String::from("/root/ggsnap_slave")
+                ggsnap_slave_bin: String::from("/root/ggsnap_slave"),
+                log_file: String::from("ggsnap.log"),
             },
             snapshot: Snapshot {
                 number_days_every_day: 10,
@@ -74,6 +75,7 @@ impl Config {
 pub struct General {
     pub gluster_bin: String,
     pub ggsnap_slave_bin: String,
+    pub log_file: String,
 }
 
 /// Struct that holds information about sub section [snapshot]  

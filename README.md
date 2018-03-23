@@ -68,6 +68,10 @@ gluster_bin = "/usr/sbin/gluster"
 # Path to ggsnap_slave on slave node change if path is different
 ggsnap_slave_bin = "/root/ggsnap_slave"
 
+# Path to log file, if empty string log file will not be written
+# Default path is in same directory as ggsnap binary 
+log_file = "ggsnap.log"
+
 
 # Settings for how snapshots should be saved
 [snapshot]
@@ -112,7 +116,7 @@ password = ""
 from_sender_address = ""
 # List of mail addresses to send to
 to_addresses = [ "foobar@foobar.com", "noob@noob.com" ]
-# Enable or diable sending mail (default disabled)
+# Enable or disable sending mail (default disabled)
 enable = false # true
 
 ```

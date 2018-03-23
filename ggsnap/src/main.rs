@@ -167,7 +167,7 @@ fn main() {
 fn create_snapshot(config: &Config) -> Result<(), String> {
     let date = Local::now();
     let mut log = String::new();
-    log = format!("===================\n{}", date.format("%Y-%m-%d %H:%M:%S"));
+//    log = format!("===================\n{}", date.format("%Y-%m-%d %H:%M:%S"));
     log = format!("{}\nMaster: Pausing geo-replication", log);
 
     let cmd_out = Command::new(&config.general.gluster_bin)
@@ -197,7 +197,7 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
                     }
                 }
 
-                print_log(&log, false);
+                print_log(&log, date, &config, false);
                 return Err(String::from("Error"))
             }
             else {
@@ -210,7 +210,7 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
                           config.snapshot.slave_hostname.clone().unwrap(),
                           config.snapshot.slave_volume.clone().unwrap());
             log = format!("{}\nMaster: Error: {}", log, e.to_string());
-            print_log(&log, false);
+            print_log(&log, date, &config, false);
             return Err(String::from("Error"))
         }
     }
@@ -246,10 +246,10 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
             if !o.status.success() {
                 match resume_geo_replication(&config, &log) {
                     Ok(l) => {
-                        print_log(&l, false);
+                        print_log(&l, date, &config, false);
                     }
                     Err(l) => {
-                        print_log(&l, false);
+                        print_log(&l, date, &config, false);
                     }
                 }
 
@@ -260,7 +260,7 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
             log = format!("{}\nMaster: Error running command: gluster snapshot create {} {} no-timestamp",
                           log, snap_name, config.snapshot.master_volume.clone().unwrap());
             log = format!("{}\nMaster: Error: {}", log, e.to_string());
-            print_log(&log, false);
+            print_log(&log, date, &config, false);
             return Err(String::from("Error"))
         }
     }
@@ -284,10 +284,10 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
 
     match resume_geo_replication(&config, &log) {
         Ok(l) => {
-            print_log(&l, slave_snap_success && old_snap_success);
+            print_log(&l, date, &config, slave_snap_success && old_snap_success);
         }
         Err(l) => {
-            print_log(&l, false);
+            print_log(&l, date, &config, false);
             return Err(String::from("Error"))
         }
     }
@@ -474,10 +474,68 @@ fn print_statistics(config: &Config) -> Result<(),()>{
 /// directory as binary
 /// If mail is active, mail will be sent
 /// with result.
-fn print_log(log: &String, success: bool) {
+fn print_log(log: &String, date: DateTime<Local>, config: &Config, success: bool) {
     //TODO
     // Send mail and and append to log in same dir as ggsnap
-    println!("{}\nSuccess: {}", log, success);
+    let mut header: String = format!("\n\n====================================================================================\n");
+    header = format!("{}=                 gluster-geo-snapshot date: {}                 =",
+                     header, date.format("%Y-%m-%d %H:%M:%S"));
+    header = format!("{}\n====================================================================================\n", header);
+
+    let mut tail: String = format!("\n====================================================================================\n");
+
+    if success {
+        tail = format!("{}=                      Snapshots updated successfully                              =\n", tail);
+    }
+    else {
+        tail = format!("{}=                        Error updating snapshots                                  =\n", tail);
+    }
+    tail = format!("{}====================================================================================\n", tail);
+
+    let mut clean_log: Vec<String> = Vec::new();
+    let mut prev_l = "";
+
+    for l in log.split("\n") {
+        if l.len() > 0 {
+            if l.contains("Do you still want to continue? (y/n)") {
+                let s: Vec<&str> = l.split("Do you still want to continue? (y/n)").collect();
+                clean_log.push(s[0].to_string());
+
+                if prev_l.starts_with("Master") {
+                    clean_log.push(format!("Master: {}", s[1]));
+                }
+                else {
+                    clean_log.push(format!("Slave: {}", s[1]));
+                }
+            }
+            else {
+                if l.starts_with("Master") || l.starts_with("Slave") {
+                    clean_log.push(l.to_string());
+                }
+                else {
+                    if prev_l.starts_with("Master") {
+                        clean_log.push(format!("Master: {}", l));
+                    }
+                    else {
+                        clean_log.push(format!("Slave: {}", l));
+                    }
+                }
+            }
+            prev_l = l;
+        }
+    }
+
+    if config.general.log_file.len() > 0 {
+        let mut exe_path = std::env::current_exe().unwrap();
+        exe_path.pop();
+        let log_path = format!("{}/{}", exe_path.to_str().unwrap(), config.general.log_file);
+    }
+
+    println!("{}", header);
+    for l in clean_log {
+        println!("{}", l);
+    }
+    println!("{}", tail);
 }
 
 /// Build argument parsing and help text
