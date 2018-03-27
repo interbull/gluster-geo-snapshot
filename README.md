@@ -27,8 +27,8 @@ There are two options to create snapshots:
 
 ## Compilation
 gluster-geo-snapshot is written in rust: <https://www.rust-lang.org>  
-Make sure that OpenSSL development package is installed on host 
-before compiling, on centos 7 package is called: openssl-devel
+Make sure that OpenSSL development package is installed on host before compiling.
+On centos 7 package is called: openssl-devel.
 To compile install both rust and cargo packages, on centos 7:  
 
 ```
@@ -51,6 +51,7 @@ cd ggsnap_slave
 cargo build --release
 # binary will be found in ./target/release/ggsnap_slave
 ```
+
 
 ## ggsnap.conf file
 The config file for gluster-geo-snapshot is called: ggsnap.conf  
@@ -108,16 +109,22 @@ slave_user = ""
 # All values are optional but if specified all values
 # must be specified
 [mail_from_master]
-# Smtp server to use when sending mails
-smtp_server = ""
-authentification_mechanism = "plain"
-# Valid values are: plan, login, crammd5
+# For encryption, domain to validate TLS certificates
+# Optional, only valid when using certificates
+tls_domain = ""
+# Valid values are: plain, login, crammd5
+# Default value is plain
+authentication_mechanism = "plain"
+# Credentials
 username = ""
 password = ""
 # Mail address that mail will be sent from
 from_sender_address = ""
 # List of mail addresses to send to
 to_addresses = [ "foobar@foobar.com", "noob@noob.com" ]
+# Subject in mail, OK or Error will be appended 
+# to subject string
+subject = "Gluster geo replication snapshot"
 # Enable or disable sending mail (default disabled)
 enable = false # true
 
