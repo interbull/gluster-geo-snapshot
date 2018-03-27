@@ -21,6 +21,7 @@
 extern crate chrono;
 extern crate clap;
 extern crate ggsnap_utils;
+extern crate lettre;
 
 mod stats;
 
@@ -28,6 +29,11 @@ use chrono::prelude::*;
 use clap::{Arg, ArgMatches, App};
 use std::process::Command;
 use ggsnap_utils::{get_config, Config, ConfigReadErr };
+use std::path::Path;
+use std::fs::OpenOptions;
+use std::io::{ Write, BufWriter };
+use lettre::smtp::authentication::{ Credentials, Mechanism };
+use lettre::{SimpleSendableEmail, EmailTransport, EmailAddress, SmtpTransport};
 
 /// Parses command line arguments and
 /// checks that configuration is correct
@@ -38,11 +44,11 @@ fn main() {
        matches.is_present("USER")     || matches.is_present("SLAVE_HOST") ||
        matches.is_present("SNAPSHOT") || matches.is_present("INFO") {
 
-        let mut config: Config = Config::default_config();
+        let mut _config: Config = Config::default_config();
         let mut config_file_exist = true;
         let mut config_err = false;
         let mut config_err_text: String = String::new();
-        config = match get_config() {
+        _config = match get_config() {
             Ok(c) => c,
             Err((e, e_str)) => {
                 if e == ConfigReadErr::ConfigNotFound {
@@ -62,40 +68,40 @@ fn main() {
         };
 
         match matches.value_of("VOLUME") {
-            Some(v) => config.snapshot.master_volume = Some(String::from(v)),
+            Some(v) => _config.snapshot.master_volume = Some(String::from(v)),
             None => (),
         }
 
         match matches.value_of("SLAVE") {
-            Some(v) => config.snapshot.slave_volume = Some(String::from(v)),
+            Some(v) => _config.snapshot.slave_volume = Some(String::from(v)),
             None => (),
         }
 
         match matches.value_of("USER") {
-            Some(v) => config.snapshot.slave_user = Some(String::from(v)),
+            Some(v) => _config.snapshot.slave_user = Some(String::from(v)),
             None => (),
         }
 
         match matches.value_of("SLAVE_HOST") {
-            Some(v) => config.snapshot.slave_hostname = Some(String::from(v)),
+            Some(v) => _config.snapshot.slave_hostname = Some(String::from(v)),
             None => (),
         }
 
-        if config.snapshot.slave_volume.is_none() {
-            config.snapshot.slave_volume = config.snapshot.master_volume.clone();
+        if _config.snapshot.slave_volume.is_none() {
+            _config.snapshot.slave_volume = _config.snapshot.master_volume.clone();
         }
 
-        if config.snapshot.snapshot_name_prefix.is_none() {
+        if _config.snapshot.snapshot_name_prefix.is_none() {
             let c = Config::default_config();
-            config.snapshot.snapshot_name_prefix = c.snapshot.snapshot_name_prefix.clone();
+            _config.snapshot.snapshot_name_prefix = c.snapshot.snapshot_name_prefix.clone();
         }
 
-        if config.snapshot.master_volume.is_none() {
+        if _config.snapshot.master_volume.is_none() {
             config_err_text = String::from("Error: Missing config value master volume name: master_volume");
             config_err = true;
         }
 
-        if config.snapshot.slave_volume.is_none() {
+        if _config.snapshot.slave_volume.is_none() {
             if config_err_text.len() == 0 {
                 config_err_text = String::from("Error: Missing config value slave volume name: slave_volume");
             }
@@ -105,7 +111,7 @@ fn main() {
             config_err = true;
         }
 
-        if config.snapshot.slave_user.is_none() {
+        if _config.snapshot.slave_user.is_none() {
             if config_err_text.len() == 0 {
                 config_err_text = String::from("Error: Missing config value slave user name: slave_user");
             }
@@ -115,7 +121,7 @@ fn main() {
             config_err = true;
         }
 
-        if config.snapshot.slave_hostname.is_none() {
+        if _config.snapshot.slave_hostname.is_none() {
             if config_err_text.len() == 0 {
                 config_err_text = String::from("Error: Missing config value slave hostname name: slave_hostname");
             }
@@ -125,7 +131,7 @@ fn main() {
             config_err = true;
         }
 
-        let config = config;
+        let config = _config;
 
         if matches.is_present("INFO") && 
            config.snapshot.slave_hostname.is_some() {
@@ -299,8 +305,8 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
 
 /// Resuming of geo-replication
 fn resume_geo_replication(config: &Config, log: &String) -> Result<String, String> {
-    let mut l: String = String::new();
-    l = format!("{}\nMaster: Resuming geo-replication", log);
+    let mut _l: String = String::new();
+    _l = format!("{}\nMaster: Resuming geo-replication", log);
     let cmd_out = Command::new(&config.general.gluster_bin)
                           .arg("volume")
                           .arg("geo-replication")
@@ -313,23 +319,23 @@ fn resume_geo_replication(config: &Config, log: &String) -> Result<String, Strin
 
     match cmd_out {
         Ok(o) => {
-            l = format!("{}\nMaster: {}{}", l, String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+            _l = format!("{}\nMaster: {}{}", _l, String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
             if !o.status.success() {
-                return Err(l)
+                return Err(_l)
             }
         }
         Err(e) => {
-            l = format!("{}\nMaster: Error running command: gluster volume geo-replication {} {}@{}::{} resume", 
-                        l, config.snapshot.master_volume.clone().unwrap(),
+            _l = format!("{}\nMaster: Error running command: gluster volume geo-replication {} {}@{}::{} resume", 
+                        _l, config.snapshot.master_volume.clone().unwrap(),
                         config.snapshot.slave_user.clone().unwrap(),
                         config.snapshot.slave_hostname.clone().unwrap(),
                         config.snapshot.slave_volume.clone().unwrap());
-            l = format!("{}\nMaster: Error:{}", l, e.to_string());
-            return Err(l)
+            _l = format!("{}\nMaster: Error:{}", _l, e.to_string());
+            return Err(_l)
         }
     }
  
-    Ok(l)
+    Ok(_l)
 }
 
 /// Connects to main slave node over ssh
@@ -428,11 +434,11 @@ fn print_statistics(config: &Config) -> Result<(),()>{
                           .arg("--list")
                           .output();
 
-    let mut slave_gluster_out: String = String::from("");
+    let mut _slave_gluster_out: String = String::from("");
     match cmd_out {
         Ok(o) => {
             if o.status.success() {
-                slave_gluster_out = String::from_utf8_lossy(&o.stdout).to_string();
+                _slave_gluster_out = String::from_utf8_lossy(&o.stdout).to_string();
             }
             else {
                 println!("Master: Error running ggsnap_slave: {}{}", 
@@ -449,7 +455,7 @@ fn print_statistics(config: &Config) -> Result<(),()>{
     }
 
     
-    let slave_stats = stats::SnapStat::new(slave_gluster_out, &config.snapshot.slave_volume.clone().unwrap());
+    let slave_stats = stats::SnapStat::new(_slave_gluster_out, &config.snapshot.slave_volume.clone().unwrap());
     let stats = stats::get_statistics(&config);
 
     println!("==================================================================================");
@@ -470,15 +476,15 @@ fn print_statistics(config: &Config) -> Result<(),()>{
     Ok(())
 }
 
-/// Prints result to log file in same 
-/// directory as binary
+/// Prints result to log file in specified
+/// log file in config file
 /// If mail is active, mail will be sent
 /// with result.
 fn print_log(log: &String, date: DateTime<Local>, config: &Config, success: bool) {
     //TODO
     // Send mail and and append to log in same dir as ggsnap
     let mut header: String = format!("\n\n====================================================================================\n");
-    header = format!("{}=                 gluster-geo-snapshot date: {}                 =",
+    header = format!("{}=                 gluster-geo-snapshot date: {}                   =",
                      header, date.format("%Y-%m-%d %H:%M:%S"));
     header = format!("{}\n====================================================================================\n", header);
 
@@ -488,10 +494,12 @@ fn print_log(log: &String, date: DateTime<Local>, config: &Config, success: bool
         tail = format!("{}=                      Snapshots updated successfully                              =\n", tail);
     }
     else {
-        tail = format!("{}=                        Error updating snapshots                                  =\n", tail);
+        tail = format!("{}=                    -**- Error updating snapshots -**-                            =\n", tail);
     }
     tail = format!("{}====================================================================================\n", tail);
 
+    let mut _log_msg: String = String::new();
+    let mut _log_msg_no_tail: String = String::new();
     let mut clean_log: Vec<String> = Vec::new();
     let mut prev_l = "";
 
@@ -525,17 +533,149 @@ fn print_log(log: &String, date: DateTime<Local>, config: &Config, success: bool
         }
     }
 
-    if config.general.log_file.len() > 0 {
-        let mut exe_path = std::env::current_exe().unwrap();
-        exe_path.pop();
-        let log_path = format!("{}/{}", exe_path.to_str().unwrap(), config.general.log_file);
+    _log_msg = format!("{}", header);
+    for l in clean_log {
+        _log_msg = format!("{}\n{}", _log_msg, l);
+    }
+    _log_msg_no_tail = _log_msg.clone();
+    _log_msg = format!("{}\n{}", _log_msg, tail);
+
+    let res_mail = send_log_mail(&_log_msg, &config, success);
+    _log_msg = format!("{}\n{}\n{}", _log_msg_no_tail, res_mail, tail);
+
+    match write_to_log_file(&_log_msg, &config) {
+        Ok(_) => (),
+        Err(e) => println!("{}", e),
     }
 
-    println!("{}", header);
-    for l in clean_log {
-        println!("{}", l);
+
+}
+
+/// Write log to log file 
+/// as specified in config file 
+fn write_to_log_file(log: &String, config: &Config) -> Result<(), String> {
+    let mut _rel_path: String = String::new();
+    let mut log_path = Path::new(&config.general.log_file);
+  
+    if config.general.log_file.len() > 0 {
+        if log_path.is_relative() {
+            let mut exe_path = match std::env::current_exe() {
+                Ok(p)  => p, 
+                Err(e) => return Err(format!("Error getting exe path, can not write to log.\nError: {}", e.to_string())),
+            };
+
+            exe_path.pop();
+            let l_path = match exe_path.to_str() {
+                Some(p) => p,
+                None    => return Err(String::from("Path is not valid unicode, can not write to log.")),
+            };
+
+            _rel_path = format!("{}/{}", l_path, config.general.log_file);
+            log_path = Path::new(&_rel_path);
+        } 
+
+        let mut open_opt: OpenOptions = OpenOptions::new();
+
+        if log_path.exists() {
+            open_opt.append(true);
+        }
+        else {
+            open_opt.create(true).write(true);
+        }
+
+
+        let f = match open_opt.open(log_path) {
+            Ok(f) => f,
+            Err(e) => return Err(format!("Error opening log file: {}\nError: {}", log_path.to_str().unwrap(), e.to_string())),
+        };
+
+        let mut f = BufWriter::new(f);
+
+        return match f.write_all(log.as_bytes()) {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(format!("Error writing to log file: {}\nError: {}", log_path.to_str().unwrap(), e.to_string())),
+        };
     }
-    println!("{}", tail);
+    else {
+        println!("{}", log);
+    }
+
+    Ok(())
+}
+
+/// If mail is enabled in config file
+/// Mail will be sent according to
+/// config file settings.
+fn send_log_mail(log: &String, config: &Config, success: bool) -> String {
+    if let Some(ref mail_conf) = config.mail_from_master {
+        if mail_conf.enable {
+            let mut msg: String = String::from("To: ");
+            let mut to = mail_conf.to_addresses.clone();
+            let mut auth: Mechanism = Mechanism::Plain;
+            let mut mailer_build;
+
+            let first_to = to.pop();
+            if first_to.is_some() {
+                msg = format!("{}{}", msg, first_to.unwrap());                
+            }
+
+            for m in to {
+                msg = format!("{},{}", msg, m);
+            }
+
+            if success {
+                msg = format!("{}\nSubject: {}: OK\n", msg, mail_conf.subject.clone());
+            }
+            else {
+                msg = format!("{}\nSubject: {}: Error\n", msg, mail_conf.subject.clone());
+            }
+
+            msg = format!("{}{}", msg, log);
+
+            to = mail_conf.to_addresses.clone();
+            let mut mail_to: Vec<EmailAddress> = Vec::new();
+
+            for m in to {
+                mail_to.push(EmailAddress::new(m));
+            }
+
+            if mail_conf.authentication_mechanism == "login".to_string() {
+                auth = Mechanism::Login;
+            }
+            else if mail_conf.authentication_mechanism == "crammd5".to_string() {
+                auth = Mechanism::CramMd5;
+            }
+
+
+
+            // Use TLS certificates
+            if mail_conf.tls_domain.is_some() {
+                mailer_build = SmtpTransport::simple_builder(mail_conf.tls_domain.clone().unwrap()).unwrap();
+            }
+            else {
+                mailer_build = SmtpTransport::builder_unencrypted_localhost().unwrap();
+        
+            }
+
+            let email = SimpleSendableEmail::new(
+                EmailAddress::new(mail_conf.from_sender_address.to_string()),
+                mail_to,
+                "message_id".to_string(),
+                msg,
+            );
+
+            let mut mailer = mailer_build.credentials(Credentials::new(mail_conf.username.clone(), mail_conf.password.clone()))
+                .smtp_utf8(true)
+                .authentication_mechanism(auth).build();
+
+            match mailer.send(&email) {
+                Ok(_) => return "Master: Email sent OK".to_string(),
+                Err(e) => return format!("Master: Error sending mail: {}", e.to_string()),
+            }
+        }
+    }
+    
+    "Master: Email is not enabled".to_string()
 }
 
 /// Build argument parsing and help text

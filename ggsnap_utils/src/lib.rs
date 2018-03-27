@@ -96,12 +96,13 @@ pub struct Snapshot {
 /// in config file
 #[derive(Deserialize, Debug, PartialEq)]
 pub struct MailFromMaster {
-    pub smtp_server: String,
-    pub authentification_mechanism: String,
+    pub tls_domain: Option<String>,
+    pub authentication_mechanism: String,
     pub username: String,
     pub password: String,
     pub from_sender_address: String,
     pub to_addresses: Vec<String>,
+    pub subject: String, 
     pub enable: bool,
 }
 
@@ -202,11 +203,11 @@ pub fn get_config() -> Result<Config, (ConfigReadErr, String)> {
     };
     
     let month_30 = vec![4, 6, 9, 11];
-    let mut today = Local::today();
+    let today = Local::today();
     let mut date1 = today - chrono::Duration::days(config.snapshot.number_days_every_day as i64);
     date1 = date1 - chrono::Duration::weeks(config.snapshot.number_weeks_with_one as i64);
-    let mut year = config.snapshot.number_months_total/12;
-    let mut year_mod = config.snapshot.number_months_total%12;
+    let year = config.snapshot.number_months_total/12;
+    let year_mod = config.snapshot.number_months_total%12;
 
     let mut date2 = today.offset().ymd(today.year() - year as i32, today.month(), today.day());
 
@@ -273,11 +274,11 @@ fn parse_config(config_content: &String) -> Result<Config, (ConfigReadErr, Strin
 /// On success a String containing removed snapshots
 /// will be returned. On error, error message will be returned
 pub fn remove_old_snapshots(config: &Config, host_type: HostType) -> Result<String, String> {
-    let mut snap_output: String = String::new();
-    let mut gluster_snaps: Vec<String> = Vec::new();
-    let mut rm_every_day: Vec<String> = Vec::new();
-    let mut rm_weeks_one: Vec<String> = Vec::new();
-    let mut rm_months_total: Vec<String> = Vec::new();
+    let mut _snap_output: String = String::new();
+    let mut _gluster_snaps: Vec<String> = Vec::new();
+    let mut _rm_every_day: Vec<String> = Vec::new();
+    let mut _rm_weeks_one: Vec<String> = Vec::new();
+    let mut _rm_months_total: Vec<String> = Vec::new();
     let mut rm_tot: Vec<String> = Vec::new();
     let mut rm_tot_res: String = String::new();
     let mut del_err: bool = false;
@@ -289,15 +290,15 @@ pub fn remove_old_snapshots(config: &Config, host_type: HostType) -> Result<Stri
     match cmd_out {
         Ok(o) => {
             if o.status.success() {
-                snap_output = format!("{}", String::from_utf8_lossy(&o.stdout));
-                gluster_snaps = filter_gluster_snapshots(&snap_output, &config, &host_type);
+                _snap_output = format!("{}", String::from_utf8_lossy(&o.stdout));
+                _gluster_snaps = filter_gluster_snapshots(&_snap_output, &config, &host_type);
 
-                rm_every_day = get_remove_every_day(&config, &gluster_snaps, &host_type);
-                rm_tot.extend(rm_every_day);
-                rm_weeks_one = get_remove_weeks_with_one(&config, &gluster_snaps, &host_type);
-                rm_tot.extend(rm_weeks_one);
-                rm_months_total = get_remove_months_total(&config, &gluster_snaps, &host_type);
-                rm_tot.extend(rm_months_total);
+                _rm_every_day = get_remove_every_day(&config, &_gluster_snaps, &host_type);
+                rm_tot.extend(_rm_every_day);
+                _rm_weeks_one = get_remove_weeks_with_one(&config, &_gluster_snaps, &host_type);
+                rm_tot.extend(_rm_weeks_one);
+                _rm_months_total = get_remove_months_total(&config, &_gluster_snaps, &host_type);
+                rm_tot.extend(_rm_months_total);
                 rm_tot.sort();
 
                 for l in rm_tot {
@@ -460,19 +461,19 @@ fn filter_gluster_snapshots(all_snaps: &String, config: &Config, host_type: &Hos
 fn get_remove_every_day(config: &Config, all_gluster_snaps: &Vec<String>, host_type: &HostType) -> Vec<String> {
     let mut rm_snaps: HashSet<String> = HashSet::new();
     let mut dt = Local::now();
-    let mut snap_pre: String = String::new();
+    let mut _snap_pre: String = String::new();
 
-    for i in 1..config.snapshot.number_days_every_day + 1 {
+    for _i in 1..config.snapshot.number_days_every_day + 1 {
         if *host_type == HostType::Master {
-            snap_pre = format!("{}_{}_{}_", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+            _snap_pre = format!("{}_{}_{}_", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
                                config.snapshot.master_volume.clone().unwrap(), dt.format("%Y%m%d"));
         }        
         else {
-            snap_pre = format!("{}_{}_{}_", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+            _snap_pre = format!("{}_{}_{}_", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
                                config.snapshot.slave_volume.clone().unwrap(), dt.format("%Y%m%d"));
         }
 
-        let found = all_gluster_snaps.iter().filter(|&& ref s| s.starts_with(&snap_pre));
+        let found = all_gluster_snaps.iter().filter(|&& ref s| s.starts_with(&_snap_pre));
         let mut found_sort: Vec<&String> = found.collect();
         found_sort.sort_by(|a, b| b.cmp(a));
         let mut found_iter = found_sort.iter();
@@ -496,40 +497,40 @@ fn get_remove_weeks_with_one(config: &Config, all_gluster_snaps: &Vec<String>, h
     let mut rm_snaps: HashSet<String> = HashSet::new();
     let mut date = Local::today();
     date = date + chrono::Duration::days(-((config.snapshot.number_days_every_day) as i64));
-    let mut date1 = Local::today();
-    let mut date2 = Local::today();
+    let mut _date1 = Local::today();
+    let mut _date2 = Local::today();
 
     if config.snapshot.number_weeks_with_one == 0 {
         return Vec::new();
     }
 
     for week_no in 0..config.snapshot.number_weeks_with_one {
-        date1 = date + chrono::Duration::weeks(-(week_no as i64));
-        date2 = date1 + chrono::Duration::days(-6);
+        _date1 = date + chrono::Duration::weeks(-(week_no as i64));
+        _date2 = _date1 + chrono::Duration::days(-6);
 
-        let mut snap_first: String = String::new();
-        let mut snap_last: String = String::new();
+        let mut _snap_first: String = String::new();
+        let mut _snap_last: String = String::new();
         
         if *host_type == HostType::Master {
-            snap_first = format!("{}_{}_{}_240000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
-                                config.snapshot.master_volume.clone().unwrap(), date1.format("%Y%m%d"));
+            _snap_first = format!("{}_{}_{}_240000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                                config.snapshot.master_volume.clone().unwrap(), _date1.format("%Y%m%d"));
         }
         else {
-            snap_first = format!("{}_{}_{}_240000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
-                                config.snapshot.slave_volume.clone().unwrap(), date1.format("%Y%m%d"));
+            _snap_first = format!("{}_{}_{}_240000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                                config.snapshot.slave_volume.clone().unwrap(), _date1.format("%Y%m%d"));
         }
     
         if *host_type == HostType::Master {
-            snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
-                                config.snapshot.master_volume.clone().unwrap(), date2.format("%Y%m%d"));
+            _snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                                config.snapshot.master_volume.clone().unwrap(), _date2.format("%Y%m%d"));
         }
         else {
-            snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
-                                config.snapshot.slave_volume.clone().unwrap(), date2.format("%Y%m%d"));
+            _snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                                config.snapshot.slave_volume.clone().unwrap(), _date2.format("%Y%m%d"));
         }
     
     
-        let mut found: Vec<&String> = all_gluster_snaps.iter().filter(|&& ref s| *s < snap_first && *s > snap_last).collect();
+        let mut found: Vec<&String> = all_gluster_snaps.iter().filter(|&& ref s| *s < _snap_first && *s > _snap_last).collect();
 
         found.sort_by(|a, b| b.cmp(a));
         found.pop();
@@ -551,18 +552,18 @@ fn get_remove_months_total(config: &Config, all_gluster_snaps: &Vec<String>, hos
     let mut rm_snaps: HashSet<String> = HashSet::new();
     let mut last_month = Local::today();
     let mut month_start = Local::today();
-    let mut month_end = Local::today();
+    let mut _month_end = Local::today();
     
     month_start = month_start + chrono::Duration::days(-(config.snapshot.number_days_every_day as i64));
     month_start = month_start + chrono::Duration::weeks(-(config.snapshot.number_weeks_with_one as i64));
-    month_end = Local.ymd(month_start.year(), month_start.month(), 1);
+    _month_end = Local.ymd(month_start.year(), month_start.month(), 1);
 
     let mut year = last_month.year() - ((config.snapshot.number_months_total/12) as i32);
     let mut month = last_month.month() - (config.snapshot.number_months_total%12);
     let mut day = last_month.day();
     let months_30 = vec!(4, 6, 9, 11);
-    let mut snap_first: String = String::new();
-    let mut snap_last: String = String::new();
+    let mut _snap_first: String = String::new();
+    let mut _snap_last: String = String::new();
 
     if month < 1 {
         year = year -1;
@@ -586,15 +587,15 @@ fn get_remove_months_total(config: &Config, all_gluster_snaps: &Vec<String>, hos
     last_month = Local.ymd(year, month, day);
 
     if *host_type == HostType::Master {
-        snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+        _snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
                             config.snapshot.master_volume.clone().unwrap(), last_month.format("%Y%m%d"));
     }
     else {
-        snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+        _snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
                             config.snapshot.slave_volume.clone().unwrap(), last_month.format("%Y%m%d"));
     }
 
-    let old_snaps: Vec<&String> = all_gluster_snaps.iter().filter(|&& ref s| *s < snap_last).collect();
+    let old_snaps: Vec<&String> = all_gluster_snaps.iter().filter(|&& ref s| *s < _snap_last).collect();
 
     for o in old_snaps {
         rm_snaps.insert(o.clone().to_string());
@@ -608,25 +609,25 @@ fn get_remove_months_total(config: &Config, all_gluster_snaps: &Vec<String>, hos
         }
 
         if *host_type == HostType::Master {
-            snap_first = format!("{}_{}_{}_240000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+            _snap_first = format!("{}_{}_{}_240000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
                                  config.snapshot.master_volume.clone().unwrap(), month_start.format("%Y%m%d"));
         }
         else {
-            snap_first = format!("{}_{}_{}_240000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+            _snap_first = format!("{}_{}_{}_240000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
                                  config.snapshot.slave_volume.clone().unwrap(), month_start.format("%Y%m%d"));
         }
     
         if *host_type == HostType::Master {
-            snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
-                                config.snapshot.master_volume.clone().unwrap(), month_end.format("%Y%m%d"));
+            _snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                                config.snapshot.master_volume.clone().unwrap(), _month_end.format("%Y%m%d"));
         }
         else {
-            snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
-                                config.snapshot.slave_volume.clone().unwrap(), month_end.format("%Y%m%d"));
+            _snap_last = format!("{}_{}_{}_000000", config.snapshot.snapshot_name_prefix.clone().unwrap(), 
+                                config.snapshot.slave_volume.clone().unwrap(), _month_end.format("%Y%m%d"));
         }
 
 
-        let mut all_in_month: Vec<&String> = all_gluster_snaps.iter().filter(|&& ref s| *s < snap_first && *s > snap_last).collect();
+        let mut all_in_month: Vec<&String> = all_gluster_snaps.iter().filter(|&& ref s| *s < _snap_first && *s > _snap_last).collect();
 
         all_in_month.sort_by(|a, b| b.cmp(a));
         all_in_month.pop();
@@ -635,9 +636,9 @@ fn get_remove_months_total(config: &Config, all_gluster_snaps: &Vec<String>, hos
             rm_snaps.insert(s.clone().to_string());
         }
 
-        let mut y = month_end.year();
-        let mut m = month_end.month();
-        let mut d = 1;
+        let mut y = _month_end.year();
+        let mut m = _month_end.month();
+        let d = 1;
 
         if m == 1 {
             y -= 1;
@@ -647,26 +648,26 @@ fn get_remove_months_total(config: &Config, all_gluster_snaps: &Vec<String>, hos
             m -= 1;
         }
 
-        month_end = Local.ymd(y, m, d);
+        _month_end = Local.ymd(y, m, d);
 
-        if month_end.year() == last_month.year() &&
-           month_end.month() == last_month.month() {
-            month_end = last_month;
+        if _month_end.year() == last_month.year() &&
+           _month_end.month() == last_month.month() {
+            _month_end = last_month;
         }
 
         let mut d = 31;
 
-        if months_30.contains(&month_end.month()) {
+        if months_30.contains(&_month_end.month()) {
             d = 30;
         }
-        else if month_end.month() == 2 && month_end.year()%4 == 0 {
+        else if _month_end.month() == 2 && _month_end.year()%4 == 0 {
             d = 29;
         }
-        else if month_end.month() == 2 {
+        else if _month_end.month() == 2 {
             d = 28;
         }
 
-        month_start = Local.ymd(month_end.year(), month_end.month(), d);
+        month_start = Local.ymd(_month_end.year(), _month_end.month(), d);
 
     }
 

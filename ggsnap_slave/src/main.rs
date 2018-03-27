@@ -34,8 +34,8 @@ fn main() {
        matches.is_present("SNAPSHOT_NAME") || matches.is_present("REMOVE_SNAPSHOTS") {
         let mut snapshot_name: String = String::new();
         let mut config_file_exist = true;
-        let mut config = Config::default_config();
-        config = match get_config() {
+        let mut _config = Config::default_config();
+        _config = match get_config() {
             Ok(c) => c,
             Err((e, e_str)) => {
                 if e == ConfigReadErr::ConfigNotFound {
@@ -54,21 +54,21 @@ fn main() {
             }
         };
 
-        if config.snapshot.slave_volume.is_none() {
-            config.snapshot.slave_volume = config.snapshot.master_volume.clone();
+        if _config.snapshot.slave_volume.is_none() {
+            _config.snapshot.slave_volume = _config.snapshot.master_volume.clone();
         }
 
-        if config.snapshot.snapshot_name_prefix.is_none() {
+        if _config.snapshot.snapshot_name_prefix.is_none() {
             let c = Config::default_config();
-            config.snapshot.snapshot_name_prefix = c.snapshot.snapshot_name_prefix.clone();
+            _config.snapshot.snapshot_name_prefix = c.snapshot.snapshot_name_prefix.clone();
         }
 
         match matches.value_of("VOLUME") {
-            Some(v) => config.snapshot.slave_volume = Some(String::from(v)),
+            Some(v) => _config.snapshot.slave_volume = Some(String::from(v)),
             None    => (),
         }
 
-        let config = config;
+        let config = _config;
 
         match matches.value_of("SNAPSHOT_NAME") {
             Some(s) => snapshot_name = String::from(s),

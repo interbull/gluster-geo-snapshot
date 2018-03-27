@@ -7,4 +7,5 @@ authors = ["Marcus Pedersén <marcus.pedersen@slu.se>"]
 chrono = "0.4"
 clap = "2.29.4"
 regex = "0.2"
+lettre = "0.7.0"
 ggsnap_utils = { path = "../ggsnap_utils" }

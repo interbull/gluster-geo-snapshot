@@ -27,6 +27,8 @@ There are two options to create snapshots:
 
 ## Compilation
 gluster-geo-snapshot is written in rust: <https://www.rust-lang.org>  
+Make sure that OpenSSL development package is installed on host 
+before compiling, on centos 7 package is called: openssl-devel
 To compile install both rust and cargo packages, on centos 7:  
 
 ```
