@@ -29,6 +29,7 @@ use chrono::prelude::*;
 use clap::{Arg, ArgMatches, App};
 use std::process::Command;
 use ggsnap_utils::{get_config, Config, ConfigReadErr };
+use std::{ thread, time };
 use std::path::Path;
 use std::fs::OpenOptions;
 use std::io::{ Write, BufWriter };
@@ -95,6 +96,11 @@ fn main() {
             let c = Config::default_config();
             _config.snapshot.snapshot_name_prefix = c.snapshot.snapshot_name_prefix.clone();
         }
+
+	if _config.snapshot.delay_resume_geo_replication.is_none() {
+            let c = Config::default_config();
+	    _config.snapshot.delay_resume_geo_replication = c.snapshot.delay_resume_geo_replication.clone();
+	}
 
         if _config.snapshot.master_volume.is_none() {
             config_err_text = String::from("Error: Missing config value master volume name: master_volume");
@@ -306,6 +312,10 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
 /// Resuming of geo-replication
 fn resume_geo_replication(config: &Config, log: &String) -> Result<String, String> {
     let mut _l: String = String::new();
+    _l = format!("{}\nMaster: Delaying resuming geo-replication with {} seconds", log, 
+                 config.snapshot.delay_resume_geo_replication.unwrap());
+    thread::sleep(time::Duration::from_secs(config.snapshot.delay_resume_geo_replication.unwrap()));
+
     _l = format!("{}\nMaster: Resuming geo-replication", log);
     let cmd_out = Command::new(&config.general.gluster_bin)
                           .arg("volume")
