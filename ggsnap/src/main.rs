@@ -316,7 +316,7 @@ fn resume_geo_replication(config: &Config, log: &String) -> Result<String, Strin
                  config.snapshot.delay_resume_geo_replication.unwrap());
     thread::sleep(time::Duration::from_secs(config.snapshot.delay_resume_geo_replication.unwrap()));
 
-    _l = format!("{}\nMaster: Resuming geo-replication", log);
+    _l = format!("{}\nMaster: Resuming geo-replication", _l);
     let cmd_out = Command::new(&config.general.gluster_bin)
                           .arg("volume")
                           .arg("geo-replication")
