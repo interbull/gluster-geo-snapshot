@@ -94,6 +94,12 @@ number_months_total = 12
 snapshot_name_prefix = "ggsnap"
 
 # Value is optional, default value is: 0 seconds
+# This is a delay between pause of
+# geo-replication and when the 
+# snapshot starts.
+delay_after_pause_before_snapshot = 0
+
+# Value is optional, default value is: 0 seconds
 # Delay of resuming the geo-replication
 # On occation resuming can fail if it is
 # done to close to the snapshot

@@ -97,6 +97,11 @@ fn main() {
             _config.snapshot.snapshot_name_prefix = c.snapshot.snapshot_name_prefix.clone();
         }
 
+	if _config.snapshot.delay_after_pause_before_snapshot.is_none() {
+            let c = Config::default_config();
+	    _config.snapshot.delay_after_pause_before_snapshot = c.snapshot.delay_after_pause_before_snapshot.clone();
+	}
+
 	if _config.snapshot.delay_resume_geo_replication.is_none() {
             let c = Config::default_config();
 	    _config.snapshot.delay_resume_geo_replication = c.snapshot.delay_resume_geo_replication.clone();
@@ -226,6 +231,10 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
             return Err(String::from("Error"))
         }
     }
+
+    thread::sleep(time::Duration::from_secs(config.snapshot.delay_after_pause_before_snapshot.unwrap()));
+    log = format!("{}\nMaster: Delaying before creating snapshot with {} seconds", log, 
+                 config.snapshot.delay_after_pause_before_snapshot.unwrap());
 
     let snap_name = format!("{}_{}_{}", config.snapshot.snapshot_name_prefix.clone().unwrap(),
                             config.snapshot.master_volume.clone().unwrap(), date.format("%Y%m%d_%H%M%S"));
