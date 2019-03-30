@@ -25,7 +25,7 @@ extern crate chrono;
 
 use std::fs::File;
 use std::io::prelude::*;
-use std::process::Command;
+use std::process::{ Command, Stdio };
 use std::collections::HashSet;
 use std::iter::FromIterator;
 use chrono::prelude::*;
@@ -299,10 +299,37 @@ pub fn remove_old_snapshots(config: &Config, host_type: HostType) -> Result<Stri
                 rm_tot.sort();
 
                 for l in rm_tot {
+                    let yes_out = Command::new("/bin/yes").stdout(Stdio::piped()).spawn();
+
+                    if yes_out.is_err() {
+                        del_err = true;
+                        if rm_tot_res.len() == 0 {
+                            if host_type == HostType::Master {
+                                rm_tot_res = format!("Master: Error executing command yes, to delete snapshots");
+                            }
+                            else {
+                                rm_tot_res = format!("Slave: Error executing command yes, to delete snapshots");
+                            }
+                        }
+                        else {
+                            if host_type == HostType::Master {
+                                rm_tot_res = format!("{}\nMaster: Error executing command yes, to delete snapshots", rm_tot_res);
+                            }
+                            else {
+                                rm_tot_res = format!("{}\nSlave: Error executing command yes, to delete snapshots", rm_tot_res);
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    let yes_out = yes_out.unwrap();
+
                     let rm_out = Command::new(&config.general.gluster_bin)
                                          .arg("snapshot")
                                          .arg("delete")
                                          .arg(&l)
+                                         .stdin(yes_out.stdout.unwrap())
                                          .output();
 
                     match rm_out {
@@ -310,18 +337,18 @@ pub fn remove_old_snapshots(config: &Config, host_type: HostType) -> Result<Stri
                             if o.status.success() {
                                 if rm_tot_res.len() == 0 {
                                     if host_type == HostType::Master {
-                                        rm_tot_res = format!("Master: {}", l);
+                                        rm_tot_res = format!("Master: {}\nMaster: {}", l, String::from_utf8_lossy(&o.stdout));
                                     }
                                     else {
-                                        rm_tot_res = format!("Slave: {}", l);
+                                        rm_tot_res = format!("Slave: {}\nSlave: {}", l, String::from_utf8_lossy(&o.stdout));
                                     }
                                 }
                                 else {
                                     if host_type == HostType::Master {
-                                        rm_tot_res = format!("{}\nMaster: {}", rm_tot_res, l);
+                                        rm_tot_res = format!("{}\nMaster: {}\nMaster: {}", rm_tot_res, l, String::from_utf8_lossy(&o.stdout));
                                     }
                                     else {
-                                        rm_tot_res = format!("{}\nSlave: {}", rm_tot_res, l);
+                                        rm_tot_res = format!("{}\nSlave: {}\nSlave: {}", rm_tot_res, l, String::from_utf8_lossy(&o.stdout));
                                     }
                                 }
                             }
@@ -640,10 +667,8 @@ fn get_remove_months_total(config: &Config, all_gluster_snaps: &Vec<String>, hos
         month_start = Local.ymd(month_end.year(), month_end.month(), d);
 
     }
-    println!("{:?}", rm_snaps);
 
     Vec::from_iter(rm_snaps)
-
 }
 
 

@@ -274,6 +274,14 @@ fn create_snapshot(config: &Config) -> Result<(), String> {
         }
     }
 
+    match remove_old_slave_snapshots(&config) {
+        Ok(s) => log = format!("{}\n{}", log, s),
+        Err(e) => {
+            log = format!("{}\n{}", log, e);
+            old_snap_success = false;
+        }
+    }
+
     match resume_geo_replication(&config, &log) {
         Ok(l) => {
             print_log(&l, slave_snap_success && old_snap_success);
@@ -362,7 +370,7 @@ fn create_slave_snapshot(config: &Config, snap_name: &String) -> Result<String, 
 
 /// Removes old snapshot from master node according 
 /// to settings in config file.
-fn remove_old_snapshots(config: &Config) -> Result<String, String>{
+fn remove_old_snapshots(config: &Config) -> Result<String, String> {
     let mut log = String::from("Master: Removing old snapshots");
 
     match ggsnap_utils::remove_old_snapshots(config, ggsnap_utils::HostType::Master) {
@@ -370,12 +378,13 @@ fn remove_old_snapshots(config: &Config) -> Result<String, String>{
             log = format!("{}\nMaster: The following snapshots has been removed:\n{}", log, s);
             Ok(format!("{}\nMaster: End of removing snapshots", log))
         },
-        Err(e) => Err(format!("{}\nMaster: Error removing old snapshots:\n{}", log, e)),
+        Err(e) => Err(format!("{}\nMaster: Error removing old snapshots:\n{}", log, e.to_string())),
     }
 }
 
-fn remove_old_slave_snapshots(config: &Config) {
-    //TODO
+/// Removes old snapshot from slave node according 
+/// to settings in config file.
+fn remove_old_slave_snapshots(config: &Config) -> Result<String, String> {
     let cmd_out = Command::new("/bin/ssh")
                           .arg(&config.snapshot.slave_hostname.clone().unwrap())
                           .arg(&config.general.ggsnap_slave_bin)
@@ -384,6 +393,26 @@ fn remove_old_slave_snapshots(config: &Config) {
                           .arg(&config.snapshot.slave_volume.clone().unwrap())
                           .output();
 
+    match cmd_out {
+        Ok(o) => {
+            if o.status.success() {
+                Ok(format!("{}", String::from_utf8_lossy(&o.stdout)))
+            }
+            else {
+                Err(format!("Slave: Error running command: {} --remove-snapshots --volume {}\n{}{}",
+                            config.general.ggsnap_slave_bin,
+                            config.snapshot.slave_volume.clone().unwrap(),
+                            String::from_utf8_lossy(&o.stdout), 
+                            String::from_utf8_lossy(&o.stderr)))
+            }
+        },
+        Err(e) => {
+            Err(format!("Master: Error running command: ssh {} {} --remove-snapshots --volume {}\n{}",
+                        config.snapshot.slave_hostname.clone().unwrap(), 
+                        config.general.ggsnap_slave_bin, 
+                        config.snapshot.slave_volume.clone().unwrap(), e.to_string()))
+        }
+    }
 }
 
 /// Print statistics for both master snapshots
